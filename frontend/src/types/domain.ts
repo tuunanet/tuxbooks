@@ -209,19 +209,44 @@ export interface ReadingHistoryBook {
   isEmptyDuplicate: boolean;
   /** Title of the library entry that owns the picked bytes, when known. */
   duplicateOfTitle: string | null;
+  /**
+   * Path of the copy the reader opened, kept from the last file-row deletion
+   * (Last known path). Null for records detached before the app stored it.
+   */
+  lastKnownPath: string | null;
   /** Links that outlived the book's file rows. */
   providerLinks?: ProviderLink[];
 }
 
-/** How to resolve a restore when the fresh identity already has new state. */
-export type RestoreMode = "replace" | "keep" | "merge";
+/** How to resolve a restore; the lossless modes follow a different-bytes report. */
+export type RestoreMode = "replace" | "keep" | "merge" | "link_edition" | "without_file";
 
-export type RestoreStatus = "restored" | "kept" | "conflict" | "not_found";
+export type RestoreStatus = "restored" | "kept" | "conflict" | "different_bytes" | "not_found";
 
-/** The new progress/annotations that make a restore ambiguous. */
+/** The new user state on the book that owns the restored entry's place. */
 export interface RestoreConflict {
   progressPercent: number | null;
   annotationCount: number;
+  collections: number;
+  hasMetadataOverrides: boolean;
+  providerLinks: number;
+  editionLinks: number;
+}
+
+/**
+ * The forgotten book and the lossless choices on offer when a picked file's
+ * bytes match none of the trash snapshot's hashes; `ownerBookId` names the
+ * library book that already owns the pick, when one does.
+ */
+export interface RestoreDifferentBytes {
+  title: string | null;
+  author: string | null;
+  progressPercent: number | null;
+  annotationCount: number;
+  collections: number;
+  hasMetadataOverrides: boolean;
+  providerLinks: number;
+  ownerBookId: number | null;
 }
 
 /** Result of `restore_book` (mirrors `domain::RestoreOutcome`). */
@@ -235,6 +260,8 @@ export interface RestoreOutcome {
    */
   replacedBookIds: number[];
   conflict: RestoreConflict | null;
+  /** Set with `status: "different_bytes"`; null otherwise. */
+  differentBytes: RestoreDifferentBytes | null;
 }
 
 /** Result of forgetting one book (mirrors `domain::ForgetOutcome`). */
@@ -264,8 +291,12 @@ export interface BookTrashEntry {
   annotationCount: number;
   /** Fresh identity the file was rebound to, when it stayed in the library. */
   replacementBookId: number | null;
+  /** True when that replacement still holds a file row now. */
+  replacementHasFile: boolean;
   /** True when the fresh identity has progress or annotations; Restore needs a choice. */
   hasNewState: boolean;
+  /** Path of the copy the reader opened, from the trash snapshot; machine-local. */
+  lastKnownPath: string | null;
 }
 
 /**

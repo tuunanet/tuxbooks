@@ -3,7 +3,9 @@ import { BookMarked, Search, Trash2 } from "lucide-react";
 import { ForgetBookDialog } from "@/components/books/ForgetBookDialog";
 import { ResetBookDialog } from "@/components/books/ResetBookDialog";
 import { RestoreBookDialog } from "@/components/books/RestoreBookDialog";
-import { ForgottenBookRow, HistoryBookRow } from "@/components/history/ReadingHistoryRows";
+import { RestoreDifferentBytesDialog } from "@/components/books/RestoreDifferentBytesDialog";
+import { ForgottenBooksPane } from "@/components/settings/ForgottenBooksPane";
+import { HistoryBookRow } from "@/components/history/ReadingHistoryRows";
 import { useHistoryVirtualizer } from "@/components/history/useHistoryVirtualizer";
 import { VirtualRow } from "@/components/library/LibraryRow";
 import { Button } from "@/components/ui/button";
@@ -26,6 +28,7 @@ import {
   type BookTrashEntry,
   type ReadingHistoryBook,
   type RestoreConflict,
+  type RestoreDifferentBytes,
   type RestoreMode,
 } from "@/lib/bridge";
 
@@ -72,15 +75,6 @@ function HistorySkeleton() {
   );
 }
 
-function EmptyForgottenBooks() {
-  return (
-    <p data-testid="history-forgotten-empty" className="text-sm text-muted-foreground">
-      Nothing is waiting to be restored. Forgotten books appear here and stay restorable for 30
-      days.
-    </p>
-  );
-}
-
 /**
  * The History section (ADR 0014 D6): durable books with no current file, plus
  * the 30-day restore list. The library stays membership-only, so this is the
@@ -92,8 +86,23 @@ function EmptyForgottenBooks() {
  * Both tabs share one load loop and one set of dialogs, so forgetting on one
  * tab refreshes the other without a remount.
  */
+/** One bundle for the restore flow: the entry, its pick, and either dialog's payload. */
+interface RestoreFlow {
+  target: BookTrashEntry | null;
+  pick: string | undefined;
+  conflict: RestoreConflict | null;
+  differentBytes: RestoreDifferentBytes | null;
+}
+
+const idleRestoreFlow: RestoreFlow = {
+  target: null,
+  pick: undefined,
+  conflict: null,
+  differentBytes: null,
+};
+
 export function HistorySettings() {
-  const { refresh } = useLibrary();
+  const { refresh, books: libraryBooks } = useLibrary();
   const [books, setBooks] = useState<ReadingHistoryBook[] | null>(null);
   const [trash, setTrash] = useState<BookTrashEntry[]>([]);
   const [query, setQuery] = useState("");
@@ -102,8 +111,7 @@ export function HistorySettings() {
   const [busyId, setBusyId] = useState<number | null>(null);
   const [resetTarget, setResetTarget] = useState<ReadingHistoryBook | null>(null);
   const [forgetTargets, setForgetTargets] = useState<number[] | null>(null);
-  const [restoreTarget, setRestoreTarget] = useState<BookTrashEntry | null>(null);
-  const [restoreConflict, setRestoreConflict] = useState<RestoreConflict | null>(null);
+  const [restoreFlow, setRestoreFlow] = useState<RestoreFlow>(idleRestoreFlow);
   const [restoreBusy, setRestoreBusy] = useState(false);
   const requestRef = useRef(0);
   const queryRef = useRef("");
@@ -237,18 +245,30 @@ export function HistorySettings() {
   }, [forgetTargets, refresh, load, loadTrash]);
 
   const runRestore = useCallback(
-    async (entry: BookTrashEntry, mode?: RestoreMode) => {
+    async (entry: BookTrashEntry, mode?: RestoreMode, pickedPath?: string) => {
       setRestoreBusy(true);
       setError(null);
       try {
-        const outcome = await restoreBook(entry.id, mode);
+        const outcome = await restoreBook(entry.id, mode, pickedPath);
         if (outcome.status === "conflict") {
-          setRestoreTarget(entry);
-          setRestoreConflict(outcome.conflict);
+          setRestoreFlow({
+            target: entry,
+            pick: pickedPath,
+            conflict: outcome.conflict,
+            differentBytes: null,
+          });
           return;
         }
-        setRestoreTarget(null);
-        setRestoreConflict(null);
+        if (outcome.status === "different_bytes") {
+          setRestoreFlow({
+            target: entry,
+            pick: pickedPath,
+            conflict: null,
+            differentBytes: outcome.differentBytes,
+          });
+          return;
+        }
+        setRestoreFlow(idleRestoreFlow);
         await Promise.all([refresh(), load(queryRef.current), loadTrash()]);
       } catch (err) {
         setError(toMessage(err));
@@ -257,6 +277,19 @@ export function HistorySettings() {
       }
     },
     [refresh, load, loadTrash],
+  );
+
+  const restoreFromRow = useCallback(
+    async (entry: BookTrashEntry) => {
+      if (entry.replacementBookId !== null && entry.replacementHasFile) {
+        await runRestore(entry);
+        return;
+      }
+      const pickedPath = await pickBookFile(entry.id);
+      if (pickedPath === null) return;
+      await runRestore(entry, undefined, pickedPath);
+    },
+    [runRestore],
   );
 
   const toggleSelected = useCallback((bookId: number, next: boolean) => {
@@ -299,9 +332,8 @@ export function HistorySettings() {
           </TabsTrigger>
         </TabsList>
 
-        {/* Both panes stay mounted: one load loop feeds them, and a forget on
-            either side is reflected on the other without a refetch-on-switch. */}
-        <TabsContent value="detached" forceMount className="mt-4">
+        {/* Panes stay mounted (one load loop feeds both); forceMount keeps Radix from hiding them, so the inactive pane hides by class. */}
+        <TabsContent value="detached" forceMount className="mt-4 data-[state=inactive]:hidden">
           <section data-testid="history-settings-view" className="flex min-h-0 flex-col">
             <header className="mb-4 flex flex-wrap items-end justify-between gap-x-6 gap-y-3">
               <p data-testid="history-count" className="text-sm text-muted-foreground">
@@ -413,28 +445,12 @@ export function HistorySettings() {
           </section>
         </TabsContent>
 
-        <TabsContent value="forgotten" forceMount className="mt-4">
-          <section data-testid="recently-forgotten" className="flex flex-col gap-3">
-            <p className="text-sm text-muted-foreground">
-              Forgotten books stay restorable for 30 days. Restoring puts the old record and its
-              state back; if the current book has new reading data, TuxBooks asks first.
-            </p>
-            {trash.length === 0 ? (
-              <EmptyForgottenBooks />
-            ) : (
-              <ul className="flex flex-col gap-2">
-                {trash.map((entry) => (
-                  <ForgottenBookRow
-                    key={entry.id}
-                    entry={entry}
-                    busy={restoreBusy}
-                    onRestore={(target) => void runRestore(target)}
-                  />
-                ))}
-              </ul>
-            )}
-          </section>
-        </TabsContent>
+        <ForgottenBooksPane
+          trash={trash}
+          busy={restoreBusy}
+          onRestore={(target) => void restoreFromRow(target)}
+          onRestoreWithoutFile={(target) => void runRestore(target)}
+        />
       </Tabs>
 
       <ResetBookDialog
@@ -451,17 +467,29 @@ export function HistorySettings() {
         onCancel={() => setForgetTargets(null)}
       />
       <RestoreBookDialog
-        open={restoreTarget !== null && restoreConflict !== null}
-        entry={restoreTarget}
-        conflict={restoreConflict}
+        open={restoreFlow.target !== null && restoreFlow.conflict !== null}
+        entry={restoreFlow.target}
+        conflict={restoreFlow.conflict}
         busy={restoreBusy}
         onChoose={(mode) => {
-          if (restoreTarget) void runRestore(restoreTarget, mode);
+          if (restoreFlow.target) void runRestore(restoreFlow.target, mode, restoreFlow.pick);
         }}
-        onCancel={() => {
-          setRestoreTarget(null);
-          setRestoreConflict(null);
+        onCancel={() => setRestoreFlow(idleRestoreFlow)}
+      />
+      <RestoreDifferentBytesDialog
+        open={restoreFlow.differentBytes !== null}
+        report={restoreFlow.differentBytes}
+        ownerTitle={
+          restoreFlow.differentBytes?.ownerBookId != null
+            ? (libraryBooks?.find((book) => book.id === restoreFlow.differentBytes?.ownerBookId)
+                ?.title ?? null)
+            : null
+        }
+        busy={restoreBusy}
+        onChoose={(mode) => {
+          if (restoreFlow.target) void runRestore(restoreFlow.target, mode, restoreFlow.pick);
         }}
+        onCancel={() => setRestoreFlow(idleRestoreFlow)}
       />
     </div>
   );

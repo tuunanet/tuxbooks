@@ -80,6 +80,11 @@ export function HistoryBookRow({
             ) : null}
           </p>
         ) : null}
+        {book.lastKnownPath ? (
+          <p data-testid="history-was-at" className="mt-1 truncate text-xs text-muted-foreground">
+            Was at <span className="font-mono">{book.lastKnownPath}</span>
+          </p>
+        ) : null}
         <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
           <span data-testid="history-progress">{progress}</span>
           <span data-testid="history-annotations">{annotations}</span>
@@ -133,13 +138,22 @@ interface ForgottenBookRowProps {
   entry: BookTrashEntry;
   busy: boolean;
   onRestore: (entry: BookTrashEntry) => void;
+  onRestoreWithoutFile: (entry: BookTrashEntry) => void;
 }
 
-export function ForgottenBookRow({ entry, busy, onRestore }: ForgottenBookRowProps) {
+export function ForgottenBookRow({
+  entry,
+  busy,
+  onRestore,
+  onRestoreWithoutFile,
+}: ForgottenBookRowProps) {
   const progress =
     entry.progressPercent === null
       ? "No progress"
       : `${Math.round(entry.progressPercent)}% progress`;
+  // Key on the field, not the replacement's existence: a replacement that
+  // has since lost its file reads as fileless, so Restore asks for a file.
+  const replacementHoldsFile = entry.replacementBookId !== null && entry.replacementHasFile;
   return (
     <li
       data-testid="book-trash-entry"
@@ -153,23 +167,47 @@ export function ForgottenBookRow({ entry, busy, onRestore }: ForgottenBookRowPro
           {entry.annotationCount === 1 ? "annotation" : "annotations"} · forgotten{" "}
           {formatDate(entry.deletedAt)} · restorable until {formatDate(entry.expiresAt)}
         </p>
+        <p data-testid="book-trash-file-state" className="mt-1 text-xs text-muted-foreground">
+          {replacementHoldsFile
+            ? "File is in your library"
+            : "No file. Restore will ask you to choose one."}
+        </p>
         {entry.hasNewState ? (
           <p data-testid="book-trash-new-state" className="mt-1 text-xs text-muted-foreground">
             The current book has new reading data; restoring asks what to do.
           </p>
         ) : null}
+        {entry.lastKnownPath ? (
+          <p data-testid="book-trash-was-at" className="mt-1 text-xs text-muted-foreground">
+            Was at <span className="font-mono">{entry.lastKnownPath}</span>
+          </p>
+        ) : null}
       </div>
-      <Button
-        data-testid={`book-trash-restore-${entry.id}`}
-        aria-label={`Restore ${displayTitle(entry)}`}
-        variant="outline"
-        size="sm"
-        disabled={busy}
-        onClick={() => onRestore(entry)}
-      >
-        <RotateCcw data-icon="inline-start" />
-        Restore
-      </Button>
+      <div className="flex shrink-0 flex-col items-end gap-2">
+        <Button
+          data-testid={`book-trash-restore-${entry.id}`}
+          aria-label={`Restore ${displayTitle(entry)}`}
+          variant="outline"
+          size="sm"
+          disabled={busy}
+          onClick={() => onRestore(entry)}
+        >
+          <RotateCcw data-icon="inline-start" />
+          Restore
+        </Button>
+        {replacementHoldsFile ? null : (
+          <Button
+            data-testid={`book-trash-restore-without-file-${entry.id}`}
+            aria-label={`Restore ${displayTitle(entry)} without a file`}
+            variant="ghost"
+            size="sm"
+            disabled={busy}
+            onClick={() => onRestoreWithoutFile(entry)}
+          >
+            Restore without file
+          </Button>
+        )}
+      </div>
     </li>
   );
 }

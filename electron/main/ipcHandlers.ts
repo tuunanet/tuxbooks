@@ -1,3 +1,5 @@
+import path from "node:path";
+
 import {
   IPC_CHANNELS,
   MAX_CLIPBOARD_TEXT_BYTES,
@@ -5,6 +7,7 @@ import {
   isStorageRootId,
   isValidBookId,
   isValidLibraryLocationId,
+  isValidTrashId,
 } from "../shared/pathSchema";
 import { IssuedPaths, validateInvokeParams } from "./ipcPolicy";
 import { Sidecar, SidecarError } from "./sidecar";
@@ -27,6 +30,7 @@ export interface NativeDialogSurface {
     title: string;
     properties: Array<"openFile" | "openDirectory" | "multiSelections">;
     filters?: { name: string; extensions: string[] }[];
+    defaultPath?: string;
   }): Promise<{ canceled: boolean; filePaths: string[] }>;
 }
 
@@ -67,6 +71,36 @@ function requireAppSender(event: SenderEvent): void {
   }
 }
 
+/**
+ * Title and starting folder for a book-file pick. With a trash entry id,
+ * main resolves the entry itself (the reveal pattern): the renderer names
+ * ids, never filesystem paths. An id that no longer resolves, or an entry
+ * without a known path, falls back to the plain dialog — some Linux
+ * desktops hide dialog titles and older portal choosers ignore the
+ * starting folder, so the row and the in-app dialog carry the meaning.
+ */
+async function bookFileDialogOptions(
+  sidecar: Pick<Sidecar, "call">,
+  trashId: unknown,
+): Promise<{ title: string; defaultPath?: string }> {
+  const plain = { title: "Locate the book file" };
+  if (trashId === undefined) return plain;
+  if (!isValidTrashId(trashId)) {
+    throw new SidecarError("book-file picker requires a trash entry id");
+  }
+  const trash = (await sidecar.call("list_book_trash")) as Array<{
+    id: number;
+    title: string | null;
+    lastKnownPath: string | null;
+  }>;
+  const entry = trash.find((candidate) => candidate.id === trashId);
+  if (!entry) return plain;
+  return {
+    title: entry.title ? `Locate the file for "${entry.title}"` : plain.title,
+    ...(entry.lastKnownPath ? { defaultPath: path.dirname(entry.lastKnownPath) } : {}),
+  };
+}
+
 /** Register the invoke, dialog, reveal, and storage handlers on `register`. */
 export function registerIpcHandlers(
   register: (channel: string, handler: IpcHandler) => void,
@@ -91,7 +125,7 @@ export function registerIpcHandlers(
     return sidecar.call(method, params as Record<string, unknown>);
   });
 
-  register(IPC_CHANNELS.dialog, async (event, kind: unknown) => {
+  register(IPC_CHANNELS.dialog, async (event, kind: unknown, trashId: unknown) => {
     requireAppSender(event);
     if (kind === "directory") {
       const result = await dialog.showOpenDialog({
@@ -114,9 +148,10 @@ export function registerIpcHandlers(
       return picked;
     }
     if (kind === "book-file") {
+      const options = await bookFileDialogOptions(sidecar, trashId);
       const result = await dialog.showOpenDialog({
         properties: ["openFile"],
-        title: "Locate the book file",
+        ...options,
         filters: [{ name: "Ebooks", extensions: ["epub", "pdf"] }],
       });
       const picked = result.filePaths[0];

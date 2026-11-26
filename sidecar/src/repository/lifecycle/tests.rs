@@ -217,7 +217,7 @@ async fn expired_trash_is_hidden_and_unrestorable() {
     let listed = list_trash(&pool).await.unwrap();
     assert_eq!(listed.len(), 1, "the expired entry is hidden");
     assert_eq!(listed[0].book_uid, live_uid);
-    let refused = restore(&pool, expired_id, None).await.unwrap();
+    let refused = restore(&pool, expired_id, None, None).await.unwrap();
     assert_eq!(
         refused.status,
         RestoreStatus::NotFound,
@@ -231,7 +231,7 @@ async fn expired_trash_is_hidden_and_unrestorable() {
             == 0,
         "the refused restore wrote nothing"
     );
-    let outcome = restore(&pool, live_id, None).await.unwrap();
+    let outcome = restore(&pool, live_id, None, None).await.unwrap();
     assert_eq!(outcome.status, RestoreStatus::Restored);
     let restored: (i64,) = sqlx::query_as("SELECT id FROM book_records WHERE uid = ?1")
         .bind(&live_uid)
@@ -239,4 +239,109 @@ async fn expired_trash_is_hidden_and_unrestorable() {
         .await
         .unwrap();
     assert!(restored.0 > 0, "the live entry restores under a real id");
+}
+
+/// The row must tell the truth about the replacement: a replacement that
+/// has since lost its file reads as fileless, so the renderer offers the
+/// pick flow instead of promising the library still holds a copy.
+#[tokio::test(flavor = "multi_thread")]
+async fn list_trash_reports_whether_the_replacement_still_has_a_file() {
+    let tmp = tempfile::tempdir().unwrap();
+    let pool = init_pool(&tmp.path().join("t.db")).await.unwrap();
+    let fileless_uid = "1".repeat(32);
+    let held_uid = "2".repeat(32);
+    seed_record(&pool, &fileless_uid).await;
+    seed_record(&pool, &held_uid).await;
+    sqlx::query("INSERT INTO books (book_uid, path, title) VALUES (?1, '/w/held.epub', 'Held')")
+        .bind(&held_uid)
+        .execute(&pool)
+        .await
+        .unwrap();
+    for (book_uid, replacement_uid, title) in [
+        ("a", &fileless_uid, "Fileless Replacement"),
+        ("b", &held_uid, "Held Replacement"),
+    ] {
+        sqlx::query(
+            "INSERT INTO book_trash (book_id, book_uid, replacement_book_uid, snapshot_json, deleted_at, expires_at)
+             VALUES (0, ?1, ?2, ?3, '2026-11-01T00:00:00.000Z', '2999-01-01T00:00:00.000Z')",
+        )
+        .bind(book_uid)
+        .bind(replacement_uid)
+        .bind(shared_json(replacement_uid, title))
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+    let listed = list_trash(&pool).await.unwrap();
+    assert_eq!(listed.len(), 2);
+    let fileless = listed
+        .iter()
+        .find(|entry| entry.title.as_deref() == Some("Fileless Replacement"))
+        .unwrap();
+    let held = listed
+        .iter()
+        .find(|entry| entry.title.as_deref() == Some("Held Replacement"))
+        .unwrap();
+    assert!(
+        fileless.replacement_book_id.is_some(),
+        "the replacement record still exists"
+    );
+    assert!(
+        !fileless.replacement_has_file,
+        "a replacement with no file row reads as fileless"
+    );
+    assert!(
+        held.replacement_has_file,
+        "a replacement with a file row reads as holding the file"
+    );
+}
+
+/// A trash row snapshotted before the Last known path existed stays
+/// readable and simply has no path (tuxbooks-t9p.1). One bad row must not
+/// fail the whole listing.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_trash_row_from_before_the_last_known_path_stays_readable() {
+    let tmp = tempfile::tempdir().unwrap();
+    let pool = init_pool(&tmp.path().join("t.db")).await.unwrap();
+    let uid = "e".repeat(32);
+    sqlx::query(
+        "INSERT INTO book_trash (book_id, book_uid, snapshot_json, deleted_at, expires_at)
+         VALUES (0, ?1, ?2, '2026-11-01T00:00:00.000Z', '2999-01-01T00:00:00.000Z')",
+    )
+    .bind(&uid)
+    .bind(shared_json(&uid, "Detached Long Ago"))
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let listed = list_trash(&pool).await.unwrap();
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].title.as_deref(), Some("Detached Long Ago"));
+    assert!(
+        listed[0].last_known_path.is_none(),
+        "records detached before the change show no path"
+    );
+}
+
+/// The machine-portable snapshot that sync exchanges carries no Last known
+/// path: the folder names of one machine never cross to another
+/// (tuxbooks-t9p.1).
+#[tokio::test(flavor = "multi_thread")]
+async fn the_shared_snapshot_strips_the_last_known_path() {
+    let tmp = tempfile::tempdir().unwrap();
+    let pool = init_pool(&tmp.path().join("t.db")).await.unwrap();
+    let uid = "f".repeat(32);
+    let mut local: Value = serde_json::from_str(&shared_json(&uid, "Local Only")).unwrap();
+    local["book"]["last_known_path"] = json!("/home/reader/Library/local.epub");
+    let local = local.to_string();
+
+    let shared = shared_snapshot_json(&pool, &local)
+        .await
+        .unwrap()
+        .expect("the snapshot is publishable");
+    let published: Value = serde_json::from_str(&shared).unwrap();
+    assert!(
+        published["book"]["last_known_path"].is_null(),
+        "the portable snapshot has no path: {published}"
+    );
 }

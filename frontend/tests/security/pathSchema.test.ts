@@ -19,6 +19,7 @@ import {
   isValidBookFormat,
   isValidLibraryLocationId,
   isValidLibraryPath,
+  isValidTrashId,
   memberMime,
   parseBookId,
   parseCoverName,
@@ -312,6 +313,29 @@ describe("isValidLibraryLocationId (watched rows are named by id, never a path)"
       expect(isValidLibraryLocationId(bad), `expected rejection of ${JSON.stringify(bad)}`).toBe(
         false,
       );
+    }
+  });
+});
+
+describe("isValidTrashId (trash rows are named by id, never a path)", () => {
+  it("accepts positive safe integers", () => {
+    expect(isValidTrashId(1)).toBe(true);
+    expect(isValidTrashId(42)).toBe(true);
+  });
+
+  it("rejects paths, zero, negatives, non-integers, and non-numbers", () => {
+    for (const bad of [
+      "/home/user/Books",
+      0,
+      -1,
+      1.5,
+      Number.MAX_SAFE_INTEGER + 1,
+      "1",
+      null,
+      undefined,
+      {},
+    ]) {
+      expect(isValidTrashId(bad), `expected rejection of ${JSON.stringify(bad)}`).toBe(false);
     }
   });
 });

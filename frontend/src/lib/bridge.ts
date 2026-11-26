@@ -193,13 +193,17 @@ export function listBookTrash(): Promise<BookTrashEntry[]> {
   return invoke("list_book_trash");
 }
 
-/**
- * Restore a Forgotten book. With no mode the backend restores silently when
- * the fresh identity has no new progress, and returns `status: "conflict"`
- * when it does; Replace, Keep, and Merge resolve it.
- */
-export function restoreBook(trashId: number, mode?: RestoreMode): Promise<RestoreOutcome> {
-  return invoke("restore_book", mode === undefined ? { trashId } : { trashId, mode });
+/** Restore a Forgotten book; `pickedPath` restores with the picked file. */
+export function restoreBook(
+  trashId: number,
+  mode?: RestoreMode,
+  pickedPath?: string,
+): Promise<RestoreOutcome> {
+  return invoke("restore_book", {
+    trashId,
+    ...(mode === undefined ? null : { mode }),
+    ...(pickedPath === undefined ? null : { pickedPath }),
+  });
 }
 
 export function getBookMetadata(bookId: number): Promise<BookMetadata | null> {
@@ -429,8 +433,8 @@ export function onSyncApplied(
   return Promise.resolve(unlisten);
 }
 
-export function pickBookFile(): Promise<string | null> {
-  return tuxbooks().pickBookFile();
+export function pickBookFile(trashId?: number): Promise<string | null> {
+  return tuxbooks().pickBookFile(trashId);
 }
 
 export function pickBookFiles(): Promise<string[]> {

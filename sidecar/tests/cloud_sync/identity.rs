@@ -86,7 +86,7 @@ async fn a_stale_identity_replay_after_reconnect_stays_harmless() {
         .iter()
         .find(|entry| entry.book_uid == old_uid)
         .expect("the stale machine still holds its own trash");
-    let restored = lifecycle::restore(&stale.pool, stale_entry.id, None)
+    let restored = lifecycle::restore(&stale.pool, stale_entry.id, None, None)
         .await
         .unwrap();
     assert_eq!(restored.book_uid.as_deref(), Some(old_uid.as_str()));

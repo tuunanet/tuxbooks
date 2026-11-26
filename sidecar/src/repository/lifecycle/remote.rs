@@ -116,6 +116,7 @@ pub async fn apply_remote_forget(
                     series_index: None,
                     cover_path: None,
                     last_opened_at: None,
+                    last_known_path: None,
                     progress_percent: None,
                     annotation_count: 0,
                     metadata_state: "waiting_for_file".into(),

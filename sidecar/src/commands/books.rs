@@ -1,7 +1,6 @@
 use crate::domain::{
-    Book, BookFile, BookTrashEntry, BulkForgetOutcome, EditionBook, EditionLinkOutcome,
-    ForgetOutcome, IndexingRetry, LibraryStats, RestoreMode, RestoreOutcome, RestoreStatus,
-    SearchHit,
+    Book, BookFile, BulkForgetOutcome, EditionBook, EditionLinkOutcome, ForgetOutcome,
+    IndexingRetry, LibraryStats, SearchHit,
 };
 use crate::error::AppError;
 use crate::repository::{books, collections, editions, lifecycle};
@@ -361,39 +360,9 @@ async fn emit_forget(
     Ok(())
 }
 
-/// Open forgotten books still inside the 30-day window.
-pub async fn list_book_trash(state: &AppState) -> Result<Vec<BookTrashEntry>, AppError> {
-    lifecycle::list_trash(&state.db).await
-}
+mod restore;
 
-/// Restore a forgotten book. Without a mode the backend restores silently when
-/// the fresh identity has no new progress or annotations and returns a
-/// conflict otherwise; Replace, Keep, and Merge resolve it explicitly.
-pub async fn restore_book(
-    state: &AppState,
-    events: &EventEmitter,
-    trash_id: i64,
-    mode: Option<RestoreMode>,
-) -> Result<RestoreOutcome, AppError> {
-    let outcome = lifecycle::restore(&state.db, trash_id, mode).await?;
-    // Announce removed ids, or one file stays on the grid twice (tuxbooks-jpj).
-    for book_id in &outcome.replaced_book_ids {
-        events.emit(
-            "library-changed",
-            &LibraryChange::Removed { book_id: *book_id },
-        );
-    }
-    if let (RestoreStatus::Restored | RestoreStatus::Kept, Some(book_id)) =
-        (&outcome.status, outcome.book_id)
-    {
-        if let Some(book) = books::get_book(&state.db, book_id).await? {
-            crate::commands::emit_changed_book(events, book);
-        } else {
-            events.emit("library-changed", &LibraryChange::Removed { book_id });
-        }
-    }
-    Ok(outcome)
-}
+pub use restore::{list_book_trash, restore_book};
 
 #[cfg(test)]
 #[path = "books_tests.rs"]

@@ -3,9 +3,12 @@
 
 use sqlx::SqlitePool;
 
-use crate::domain::{BookTrashEntry, RestoreConflict, RestoreMode, RestoreOutcome, RestoreStatus};
+use crate::domain::{
+    BookTrashEntry, RestoreConflict, RestoreDifferentBytes, RestoreMode, RestoreOutcome,
+    RestoreStatus,
+};
 use crate::error::AppError;
-use crate::repository::metadata;
+use crate::repository::{books, metadata};
 
 use super::merge::merge_into;
 use super::now;
@@ -35,13 +38,12 @@ pub async fn list_trash(pool: &SqlitePool) -> Result<Vec<BookTrashEntry>, AppErr
             AppError::InvalidInput(format!("trash snapshot is unreadable: {err}"))
         })?;
         let replacement_book_id = match &row.replacement_book_uid {
-            Some(uid) => {
-                sqlx::query_scalar("SELECT id FROM book_records WHERE uid = ?1")
-                    .bind(uid)
-                    .fetch_optional(pool)
-                    .await?
-            }
+            Some(uid) => books::durable_id_for_uid(pool, uid).await?,
             None => None,
+        };
+        let replacement_has_file = match &row.replacement_book_uid {
+            Some(uid) => books::has_file_rows(pool, uid).await?,
+            None => false,
         };
         let has_new_state = match replacement_book_id {
             Some(id) => has_new_state(pool, id).await?,
@@ -62,51 +64,59 @@ pub async fn list_trash(pool: &SqlitePool) -> Result<Vec<BookTrashEntry>, AppErr
                 .or(snapshot.book.progress_percent),
             annotation_count: snapshot.annotations.len() as i64,
             replacement_book_id,
+            replacement_has_file,
             has_new_state,
+            last_known_path: snapshot.book.last_known_path.clone(),
         });
     }
     Ok(entries)
 }
 
-/// Restore a forgotten book. `None` restores silently when the fresh identity
-/// has no new progress or annotations and reports a conflict when it does.
-/// Replace restores the old record, Keep discards the snapshot, and Merge
-/// folds the old state into the current identity (newer progress, union of
-/// annotations).
+/// Restore a forgotten book, optionally with an explicit replacement: the
+/// library book that owns the file the user picked. The replacement takes
+/// the trash row's Forget-time uid when given, and the same id drives the
+/// conflict check, the Keep / Merge rounds, and the restore itself, so Keep
+/// and Merge cannot fall through to a detached restore. `None` restores
+/// silently when the fresh identity has no new user state and reports a
+/// conflict when it does. Replace restores the old record, Keep discards the
+/// snapshot, and Merge folds the old state into the current identity (newer
+/// progress, union of annotations).
 pub async fn restore(
     pool: &SqlitePool,
     trash_id: i64,
     mode: Option<RestoreMode>,
+    replacement: Option<i64>,
 ) -> Result<RestoreOutcome, AppError> {
-    let row: Option<SnapshotRow> = sqlx::query_as(
-        "SELECT id, book_id, book_uid, replacement_book_uid, snapshot_json,
-                deleted_at, expires_at
-         FROM book_trash
-         WHERE id = ?1 AND restored_at IS NULL AND expires_at > ?2",
-    )
-    .bind(trash_id)
-    .bind(now())
-    .fetch_optional(pool)
-    .await?;
-    let Some(row) = row else {
+    let Some((row, snapshot)) = pending_row(pool, trash_id).await? else {
         return Ok(RestoreOutcome {
             status: RestoreStatus::NotFound,
             book_id: None,
             book_uid: None,
             replaced_book_ids: Vec::new(),
             conflict: None,
+            different_bytes: None,
         });
     };
-    let snapshot: BookSnapshot = serde_json::from_str(&row.snapshot_json)
-        .map_err(|err| AppError::InvalidInput(format!("trash snapshot is unreadable: {err}")))?;
-    let replacement_id = match &row.replacement_book_uid {
-        Some(uid) => {
-            sqlx::query_scalar("SELECT id FROM book_records WHERE uid = ?1")
-                .bind(uid)
-                .fetch_optional(pool)
-                .await?
+    let replacement_id = match replacement {
+        // A picked path promised this book; if it vanished between the pick
+        // and now, say so instead of quietly restoring detached.
+        Some(id) => {
+            let exists: Option<i64> =
+                sqlx::query_scalar("SELECT id FROM book_records WHERE id = ?1")
+                    .bind(id)
+                    .fetch_optional(pool)
+                    .await?;
+            if exists.is_none() {
+                return Err(AppError::InvalidInput(
+                    "the book that owned the picked file is no longer in the library".into(),
+                ));
+            }
+            Some(id)
         }
-        None => None,
+        None => match &row.replacement_book_uid {
+            Some(uid) => books::durable_id_for_uid(pool, uid).await?,
+            None => None,
+        },
     };
 
     if let Some(replacement_id) = replacement_id {
@@ -118,6 +128,7 @@ pub async fn restore(
                 book_uid: row.replacement_book_uid.clone(),
                 replaced_book_ids: Vec::new(),
                 conflict,
+                different_bytes: None,
             });
         }
 
@@ -135,6 +146,7 @@ pub async fn restore(
                     book_uid,
                     replaced_book_ids: Vec::new(),
                     conflict: None,
+                    different_bytes: None,
                 });
             }
             Some(RestoreMode::Merge) => {
@@ -151,6 +163,7 @@ pub async fn restore(
                     book_uid,
                     replaced_book_ids: Vec::new(),
                     conflict: None,
+                    different_bytes: None,
                 });
             }
             _ => {}
@@ -165,10 +178,7 @@ pub async fn restore(
     if let Some(id) = replacement_id {
         replaced_book_ids.push(id);
     }
-    let old_id: Option<i64> = sqlx::query_scalar("SELECT id FROM book_records WHERE uid = ?1")
-        .bind(&snapshot.book.uid)
-        .fetch_optional(pool)
-        .await?;
+    let old_id = books::durable_id_for_uid(pool, &snapshot.book.uid).await?;
     if let Some(id) = old_id {
         replaced_book_ids.push(id);
     }
@@ -184,7 +194,76 @@ pub async fn restore(
         book_uid: Some(snapshot.book.uid.clone()),
         replaced_book_ids,
         conflict: None,
+        different_bytes: None,
     })
+}
+
+/// Restore the entry detached, for the lossless different-bytes choices
+/// (tuxbooks-t9p.3): the record comes back under its own uid with no file,
+/// the picked file and every library book are left alone, and the trash
+/// entry is consumed.
+pub async fn restore_detached(
+    pool: &SqlitePool,
+    trash_id: i64,
+) -> Result<RestoreOutcome, AppError> {
+    let Some((_, snapshot)) = pending_row(pool, trash_id).await? else {
+        return Ok(RestoreOutcome {
+            status: RestoreStatus::NotFound,
+            book_id: None,
+            book_uid: None,
+            replaced_book_ids: Vec::new(),
+            conflict: None,
+            different_bytes: None,
+        });
+    };
+    // The Forget-time fresh identity keeps its file and its id here, so only
+    // the old record's id can move on a renderer.
+    let mut replaced_book_ids: Vec<i64> = Vec::new();
+    let old_id = books::durable_id_for_uid(pool, &snapshot.book.uid).await?;
+    if let Some(id) = old_id {
+        replaced_book_ids.push(id);
+    }
+    let restored_id = restore_replace(pool, &snapshot, None).await?;
+    replaced_book_ids.retain(|id| *id != restored_id);
+    replaced_book_ids.sort_unstable();
+    replaced_book_ids.dedup();
+    mark_restored(pool, trash_id, "restore").await?;
+    Ok(RestoreOutcome {
+        status: RestoreStatus::Restored,
+        book_id: Some(restored_id),
+        book_uid: Some(snapshot.book.uid.clone()),
+        replaced_book_ids,
+        conflict: None,
+        different_bytes: None,
+    })
+}
+
+/// The forgotten book's identity and snapshot state, for a pick whose bytes
+/// match none of the snapshot's hashes. `owner_book_id` is the durable book
+/// that owns the picked file, resolved by the command layer. `None` when the
+/// entry is no longer restorable.
+pub async fn restore_other_bytes(
+    pool: &SqlitePool,
+    trash_id: i64,
+    owner_book_id: Option<i64>,
+) -> Result<Option<RestoreDifferentBytes>, AppError> {
+    let Some((_, snapshot)) = pending_row(pool, trash_id).await? else {
+        return Ok(None);
+    };
+    Ok(Some(RestoreDifferentBytes {
+        title: snapshot.book.title.clone(),
+        author: snapshot.book.author.clone(),
+        progress_percent: snapshot
+            .progress
+            .as_ref()
+            .and_then(|progress| progress.progress_percent)
+            .or(snapshot.book.progress_percent),
+        annotation_count: snapshot.annotations.len() as i64,
+        collections: snapshot.collections.len() as i64,
+        has_metadata_overrides: snapshot.overrides.is_some(),
+        provider_links: snapshot.providers.len() as i64,
+        owner_book_id,
+    }))
 }
 
 async fn mark_restored(pool: &SqlitePool, trash_id: i64, resolution: &str) -> Result<(), AppError> {
@@ -197,6 +276,42 @@ async fn mark_restored(pool: &SqlitePool, trash_id: i64, resolution: &str) -> Re
     Ok(())
 }
 
+/// One open, unexpired trash entry with its parsed snapshot. The restore and
+/// the pick validation read through this so both see the same entry.
+async fn pending_row(
+    pool: &SqlitePool,
+    trash_id: i64,
+) -> Result<Option<(SnapshotRow, BookSnapshot)>, AppError> {
+    let row: Option<SnapshotRow> = sqlx::query_as(
+        "SELECT id, book_id, book_uid, replacement_book_uid, snapshot_json,
+                deleted_at, expires_at
+         FROM book_trash
+         WHERE id = ?1 AND restored_at IS NULL AND expires_at > ?2",
+    )
+    .bind(trash_id)
+    .bind(now())
+    .fetch_optional(pool)
+    .await?;
+    let Some(row) = row else {
+        return Ok(None);
+    };
+    let snapshot: BookSnapshot = serde_json::from_str(&row.snapshot_json)
+        .map_err(|err| AppError::InvalidInput(format!("trash snapshot is unreadable: {err}")))?;
+    Ok(Some((row, snapshot)))
+}
+
+/// The content hashes the entry would restore onto, for pick validation in
+/// the command layer. `None` when the entry is not restorable; the restore
+/// call then reports NotFound and nothing needs checking.
+pub async fn restore_aliases(
+    pool: &SqlitePool,
+    trash_id: i64,
+) -> Result<Option<Vec<String>>, AppError> {
+    Ok(pending_row(pool, trash_id)
+        .await?
+        .map(|(_, snapshot)| snapshot.aliases))
+}
+
 async fn has_new_state(pool: &SqlitePool, book_id: i64) -> Result<bool, AppError> {
     Ok(restore_conflict(pool, book_id).await?.is_some())
 }
@@ -205,29 +320,26 @@ pub(super) async fn restore_conflict(
     pool: &SqlitePool,
     book_id: i64,
 ) -> Result<Option<RestoreConflict>, AppError> {
-    let progress: Option<f64> = sqlx::query_scalar(
-        "SELECT rp.progress_percent FROM reading_progress rp
-         JOIN book_records br ON br.uid = rp.book_uid
-         WHERE br.id = ?1",
-    )
-    .bind(book_id)
-    .fetch_optional(pool)
-    .await?
-    .flatten();
-    let annotation_count: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM annotations a
-         JOIN book_records br ON br.uid = a.book_uid
-         WHERE br.id = ?1",
-    )
-    .bind(book_id)
-    .fetch_one(pool)
-    .await?;
-    if progress.is_none() && annotation_count == 0 {
+    let uid: Option<String> = sqlx::query_scalar("SELECT uid FROM book_records WHERE id = ?1")
+        .bind(book_id)
+        .fetch_optional(pool)
+        .await?;
+    let Some(uid) = uid else {
+        return Ok(None);
+    };
+    // All six kinds of user state ask the question (tuxbooks-t9p), the same
+    // set Locate File counts before it merges.
+    let state = books::user_state(pool, &uid).await?;
+    if !state.has_state() {
         return Ok(None);
     }
     Ok(Some(RestoreConflict {
-        progress_percent: progress,
-        annotation_count,
+        progress_percent: state.progress_percent,
+        annotation_count: state.annotations,
+        collections: state.collections,
+        has_metadata_overrides: state.has_metadata_overrides,
+        provider_links: state.provider_links,
+        edition_links: state.edition_links,
     }))
 }
 

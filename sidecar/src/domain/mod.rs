@@ -9,7 +9,9 @@ pub mod provider;
 pub mod reading_progress;
 
 pub use annotation::{Annotation, AnnotationKind, AnnotationPatch, AnnotationRect, NewAnnotation};
-pub use book::{Book, BookFile, BookFormat, IndexingRetry, NewBook, ReadingHistoryBook, SearchHit};
+pub use book::{
+    Book, BookFile, BookFormat, IndexingRetry, NewBook, ReadingHistoryBook, SearchHit, UserState,
+};
 pub use collection::{Collection, CollectionMembership, CollectionSummary, NewCollection};
 pub use edition::{EditionBook, EditionLinkOutcome};
 pub use library::{
@@ -17,8 +19,8 @@ pub use library::{
     StorageStats,
 };
 pub use lifecycle::{
-    BookTrashEntry, BulkForgetOutcome, ForgetOutcome, RestoreConflict, RestoreMode, RestoreOutcome,
-    RestoreStatus,
+    BookTrashEntry, BulkForgetOutcome, ForgetOutcome, RestoreConflict, RestoreDifferentBytes,
+    RestoreMode, RestoreOutcome, RestoreStatus,
 };
 pub use metadata::{BookMetadata, MetadataFields, MetadataOverridden};
 pub use provider::{ProviderLink, ProviderReadingStatus};

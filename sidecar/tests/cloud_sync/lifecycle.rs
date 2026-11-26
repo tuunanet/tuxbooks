@@ -83,7 +83,9 @@ async fn forget_on_one_machine_is_a_shared_delete_and_restores_on_the_other() {
         .iter()
         .find(|entry| entry.book_uid == old_uid)
         .expect("the shared Forget appears in B's Reading history trash");
-    let restored = lifecycle::restore(&b.pool, entry.id, None).await.unwrap();
+    let restored = lifecycle::restore(&b.pool, entry.id, None, None)
+        .await
+        .unwrap();
     assert_eq!(restored.book_uid.as_deref(), Some(old_uid.as_str()));
     assert_eq!(progress_percent(&b, b_book).await, Some(44.0));
     assert_eq!(annotation_count(&b, b_book).await, 1);
@@ -139,7 +141,9 @@ async fn a_no_file_forget_still_propagates_and_restores_on_the_machine_with_the_
         .iter()
         .find(|entry| entry.book_uid == old_uid)
         .expect("a remote Forget with no sender file is still restorable");
-    let restored = lifecycle::restore(&b.pool, entry.id, None).await.unwrap();
+    let restored = lifecycle::restore(&b.pool, entry.id, None, None)
+        .await
+        .unwrap();
     assert_eq!(restored.book_uid.as_deref(), Some(old_uid.as_str()));
     assert_eq!(annotation_count(&b, b_book).await, 1);
 
@@ -153,6 +157,52 @@ async fn a_no_file_forget_still_propagates_and_restores_on_the_machine_with_the_
         .find(|entry| entry.book_uid == old_uid)
         .expect("A's reading history has the restored identity");
     assert_eq!(restored_a.annotation_count, 1);
+}
+
+/// The Last known path is machine-local: the sender's trash row remembers
+/// where its file was, the snapshot a peer receives does not name the
+/// sender's folders (tuxbooks-t9p.1).
+#[tokio::test(flavor = "multi_thread")]
+async fn the_last_known_path_never_crosses_devices() {
+    let sync_dir = tempfile::tempdir().unwrap();
+    let a = device().await;
+    let b = device().await;
+    let a_book = add_book(&a, "same.epub", b"detached then forgotten").await;
+    connect(&a, sync_dir.path()).await;
+    run(&a).await;
+    connect(&b, sync_dir.path()).await;
+    run(&b).await;
+    let old_uid = book_uid(&a, a_book).await;
+
+    // A drops its membership and forgets the detached record.
+    books::delete_book(&a.pool, a_book).await.unwrap();
+    let outcome = lifecycle::forget(&a.pool, a_book).await.unwrap();
+    assert!(outcome.replacement_book_id.is_none());
+    let local = lifecycle::list_trash(&a.pool).await.unwrap();
+    let local = local
+        .iter()
+        .find(|entry| entry.book_uid == old_uid)
+        .expect("A's own trash row");
+    assert!(
+        local.last_known_path.is_some(),
+        "A remembers where its file was: {:?}",
+        local.last_known_path
+    );
+
+    run(&a).await;
+    run(&b).await;
+    run(&b).await;
+
+    let remote = lifecycle::list_trash(&b.pool).await.unwrap();
+    let remote = remote
+        .iter()
+        .find(|entry| entry.book_uid == old_uid)
+        .expect("the shared Forget is restorable on B");
+    assert!(
+        remote.last_known_path.is_none(),
+        "A's folder names do not travel: {:?}",
+        remote.last_known_path
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -220,7 +270,7 @@ async fn keep_resolution_closes_the_remote_trash_without_restoring_the_old_ident
         .into_iter()
         .find(|entry| entry.book_uid == old_uid)
         .expect("remote trash entry");
-    let outcome = lifecycle::restore(&b.pool, entry.id, Some(RestoreMode::Keep))
+    let outcome = lifecycle::restore(&b.pool, entry.id, Some(RestoreMode::Keep), None)
         .await
         .unwrap();
     assert_eq!(outcome.status, RestoreStatus::Kept);

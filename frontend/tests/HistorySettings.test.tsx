@@ -91,6 +91,20 @@ describe("HistorySettings", () => {
     expect(screen.queryByTestId("history-duplicate-of")).not.toBeInTheDocument();
   });
 
+  it("shows where the file was on a detached row", async () => {
+    renderHistory([makeReadingHistoryBook({ id: 41, lastKnownPath: "/books/willows.epub" })]);
+
+    const wasAt = await screen.findByTestId("history-was-at");
+    expect(wasAt).toHaveTextContent("Was at /books/willows.epub");
+  });
+
+  it("leaves the was-at line off records detached before this change", async () => {
+    renderHistory([makeReadingHistoryBook({ id: 41, lastKnownPath: null })]);
+
+    await screen.findByTestId("history-book");
+    expect(screen.queryByTestId("history-was-at")).not.toBeInTheDocument();
+  });
+
   it("searches detached records through the sidecar", async () => {
     renderHistory([makeReadingHistoryBook({ title: "Searchable History" })]);
 
@@ -157,6 +171,139 @@ describe("HistorySettings", () => {
 
     expect(screen.getByTestId("recently-forgotten")).toHaveTextContent("Old Copy");
     expect(screen.getByTestId("recently-forgotten")).toHaveTextContent("restorable for 30 days");
+  });
+
+  it("shows one pane at a time", async () => {
+    renderHistory(
+      [makeReadingHistoryBook({ id: 41 })],
+      [makeBookTrashEntry({ id: 7, title: "Old Copy" })],
+    );
+
+    await screen.findByTestId("history-book");
+
+    // Radix keeps forceMount panes mounted and visible; the panes hide their
+    // inactive state themselves. The forgotten pane must be a real TabsContent
+    // (not a sibling section) or the detached list leaks onto its tab.
+    // Radix keeps forceMount panes mounted and visible; the panes hide their
+    // inactive state themselves. The forgotten pane must be a real TabsContent
+    // (not a sibling section) or the detached list leaks onto its tab.
+    const detachedPane = screen
+      .getByTestId("history-count")
+      .closest('[data-slot="tabs-content"]') as HTMLElement;
+    const forgottenPane = screen.getByTestId("history-tab-pane-forgotten");
+    expect(detachedPane).toHaveClass("data-[state=inactive]:hidden");
+    expect(forgottenPane).toHaveClass("data-[state=inactive]:hidden");
+
+    await userEvent.click(screen.getByTestId("history-tab-forgotten"));
+    expect(detachedPane).toHaveAttribute("data-state", "inactive");
+    expect(forgottenPane).toHaveAttribute("data-state", "active");
+    expect(screen.getByTestId("recently-forgotten").closest('[data-slot="tabs-content"]')).toBe(
+      forgottenPane,
+    );
+    expect(screen.getByTestId("history-count").closest('[data-slot="tabs-content"]')).toBe(
+      detachedPane,
+    );
+
+    await userEvent.click(screen.getByTestId("history-tab-detached"));
+    expect(detachedPane).toHaveAttribute("data-state", "active");
+    expect(forgottenPane).toHaveAttribute("data-state", "inactive");
+  });
+
+  it("shows where the forgotten file was on a trash row", async () => {
+    renderHistory(
+      [makeReadingHistoryBook({ id: 41 })],
+      [
+        makeBookTrashEntry({
+          id: 7,
+          title: "Old Copy",
+          lastKnownPath: "/books/old-copy.epub",
+        }),
+      ],
+    );
+
+    await screen.findByTestId("history-book");
+    await userEvent.click(screen.getByTestId("history-tab-forgotten"));
+
+    const wasAt = await screen.findByTestId("book-trash-was-at");
+    expect(wasAt).toHaveTextContent("Was at /books/old-copy.epub");
+  });
+
+  it("says the file is in the library when a replacement holds it", async () => {
+    renderHistory(
+      [makeReadingHistoryBook({ id: 41 })],
+      [makeBookTrashEntry({ id: 7, title: "Old Copy", replacementBookId: 51 })],
+    );
+
+    await screen.findByTestId("history-book");
+    await userEvent.click(screen.getByTestId("history-tab-forgotten"));
+
+    expect(screen.getByTestId("book-trash-file-state")).toHaveTextContent(
+      "File is in your library",
+    );
+  });
+
+  it("says Restore will ask for a file when none is in the library", async () => {
+    renderHistory(
+      [makeReadingHistoryBook({ id: 41 })],
+      [makeBookTrashEntry({ id: 7, title: "Old Copy", replacementBookId: null })],
+    );
+
+    await screen.findByTestId("history-book");
+    await userEvent.click(screen.getByTestId("history-tab-forgotten"));
+
+    expect(screen.getByTestId("book-trash-file-state")).toHaveTextContent(
+      "No file. Restore will ask you to choose one.",
+    );
+  });
+
+  it("says the file left the library when the replacement lost its file", async () => {
+    renderHistory(
+      [makeReadingHistoryBook({ id: 41 })],
+      [
+        makeBookTrashEntry({
+          id: 7,
+          title: "Old Copy",
+          replacementBookId: 51,
+          replacementHasFile: false,
+        }),
+      ],
+    );
+
+    await screen.findByTestId("history-book");
+    await userEvent.click(screen.getByTestId("history-tab-forgotten"));
+
+    expect(screen.getByTestId("book-trash-file-state")).toHaveTextContent(
+      "No file. Restore will ask you to choose one.",
+    );
+    expect(screen.getByTestId("book-trash-restore-without-file-7")).toBeInTheDocument();
+  });
+
+  it("asks for a file when the replacement has since lost its own", async () => {
+    pickBookFileMock.mockResolvedValueOnce("/books/old-copy.epub");
+    renderHistory(
+      [makeReadingHistoryBook({ id: 41 })],
+      [
+        makeBookTrashEntry({
+          id: 7,
+          replacementBookId: 51,
+          replacementHasFile: false,
+        }),
+      ],
+    );
+
+    await screen.findByTestId("history-book");
+    await userEvent.click(screen.getByTestId("history-tab-forgotten"));
+    await userEvent.click(screen.getByTestId("book-trash-restore-7"));
+
+    await waitFor(() => {
+      expect(pickBookFileMock).toHaveBeenCalledWith(7);
+    });
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith("restore_book", {
+        trashId: 7,
+        pickedPath: "/books/old-copy.epub",
+      });
+    });
   });
 
   it("says when nothing is waiting to be restored", async () => {

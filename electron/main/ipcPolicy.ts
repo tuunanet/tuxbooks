@@ -130,7 +130,7 @@ export function validateInvokeParams(method: string, params: unknown, issued: Is
   if (ISSUED_PATH_METHODS.has(method)) {
     validateIssuedPaths(method, record, issued);
   }
-  validateMethodShape(method, record);
+  validateMethodShape(method, record, issued);
 }
 
 /** Envelope checks shared by every invoke: object shape and size cap. */
@@ -205,7 +205,7 @@ function validateSyncConnect(record: Record<string, unknown>, issued: IssuedPath
   }
 }
 
-type ShapeCheck = (record: Record<string, unknown>) => void;
+type ShapeCheck = (record: Record<string, unknown>, issued: IssuedPaths) => void;
 
 function requirePositiveId(value: unknown, label: string): void {
   if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 1) {
@@ -259,11 +259,24 @@ function validateForgetBooks(record: Record<string, unknown>): void {
   }
 }
 
-function validateRestoreBook(record: Record<string, unknown>): void {
+function validateRestoreBook(record: Record<string, unknown>, issued: IssuedPaths): void {
   requirePositiveId(record.trashId, "trashId");
   const mode = record.mode;
-  if (mode !== undefined && mode !== "replace" && mode !== "keep" && mode !== "merge") {
+  if (
+    mode !== undefined &&
+    mode !== "replace" &&
+    mode !== "keep" &&
+    mode !== "merge" &&
+    mode !== "link_edition" &&
+    mode !== "without_file"
+  ) {
     throw policyError("invalid restore mode");
+  }
+  // A restore with a file may act only on the file the user actually picked:
+  // the dialog issued it; anything else is refused (T-7).
+  if (record.pickedPath !== undefined) {
+    requireLibraryPath(record.pickedPath, "pickedPath");
+    requireIssued(issued, "book-file", record.pickedPath, "pickedPath");
   }
 }
 
@@ -385,6 +398,10 @@ for (const method of BOOK_ID_METHODS) {
 }
 
 /** Per-method parameter shapes that do not carry issued paths. */
-function validateMethodShape(method: string, record: Record<string, unknown>): void {
-  METHOD_SHAPES.get(method)?.(record);
+function validateMethodShape(
+  method: string,
+  record: Record<string, unknown>,
+  issued: IssuedPaths,
+): void {
+  METHOD_SHAPES.get(method)?.(record, issued);
 }

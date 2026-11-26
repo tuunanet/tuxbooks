@@ -1,6 +1,6 @@
 use super::*;
 use crate::db::connection::init_pool;
-use crate::domain::NewBook;
+use crate::domain::{NewBook, RestoreStatus};
 use crate::sync::identity::ensure_book_identity;
 use serde_json::Value;
 use sqlx::error::{DatabaseError, ErrorKind};
@@ -117,7 +117,7 @@ async fn forget_and_restore_announce_the_ids_that_died() {
         .replacement_book_id
         .expect("a file-backed forget keeps a fresh identity");
 
-    let restored = restore_book(&state, &events, forgotten.trash_id, None)
+    let restored = restore_book(&state, &events, forgotten.trash_id, None, None)
         .await
         .unwrap();
     assert_eq!(restored.status, RestoreStatus::Restored);

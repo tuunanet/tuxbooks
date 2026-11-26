@@ -160,6 +160,34 @@ pub struct BookFile {
     pub active: bool,
 }
 
+/// The six kinds of user state a durable book can hold, counted the same way
+/// for Locate File and Restore (ADR 0019 D2, tuxbooks-t9p): progress,
+/// annotations, collections, metadata overrides, provider links, and edition
+/// links. Last-opened alone is not content and does not count.
+#[derive(Debug, Default, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UserState {
+    pub annotations: i64,
+    pub has_progress: bool,
+    pub progress_percent: Option<f64>,
+    pub collections: i64,
+    pub has_metadata_overrides: bool,
+    pub provider_links: i64,
+    pub edition_links: i64,
+}
+
+impl UserState {
+    /// Whether a merge or a silent replace could misplace any of it.
+    pub fn has_state(&self) -> bool {
+        self.annotations > 0
+            || self.has_progress
+            || self.collections > 0
+            || self.has_metadata_overrides
+            || self.provider_links > 0
+            || self.edition_links > 0
+    }
+}
+
 /// One Reading-history row: a durable book with no file rows (ADR 0014 D6).
 /// `id` is the durable book record id, so the row keeps a stable `bookId`
 /// even when there is no file to read. Metadata comes from the durable
@@ -187,6 +215,11 @@ pub struct ReadingHistoryBook {
     /// still resolves to a durable record.
     #[sqlx(default)]
     pub duplicate_of_title: Option<String>,
+    /// Path of the copy the reader opened, kept from the last file-row
+    /// deletion (Last known path, tuxbooks-t9p.1). NULL for records detached
+    /// before the change.
+    #[sqlx(default)]
+    pub last_known_path: Option<String>,
     /// Provider links survive the last file row leaving, so Reading history
     /// can show where the book is tracked elsewhere.
     #[sqlx(skip)]

@@ -11,6 +11,7 @@ use serde::Serialize;
 use sqlx::SqlitePool;
 
 use crate::domain::Book;
+use crate::domain::UserState;
 use crate::error::AppError;
 use crate::repository::books;
 use crate::repository::reading_history;
@@ -52,32 +53,7 @@ pub struct LocateConflict {
     pub owner: Book,
     /// The missing entry Locate File was trying to restore.
     pub candidate: Book,
-    pub candidate_state: LocateState,
-}
-
-#[derive(Debug, Default, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct LocateState {
-    pub annotations: i64,
-    pub has_progress: bool,
-    pub progress_percent: Option<f64>,
-    pub collections: i64,
-    pub has_metadata_overrides: bool,
-    pub provider_links: i64,
-    pub edition_links: i64,
-}
-
-impl LocateState {
-    /// User-authored state that a different-bytes merge could misplace.
-    /// Last-opened alone is not content and does not block the merge.
-    pub fn has_state(&self) -> bool {
-        self.annotations > 0
-            || self.has_progress
-            || self.collections > 0
-            || self.has_metadata_overrides
-            || self.provider_links > 0
-            || self.edition_links > 0
-    }
+    pub candidate_state: UserState,
 }
 
 /// Resolve one Locate File pick. A path outside the library reconnects the
@@ -136,7 +112,7 @@ pub async fn locate_book(
         AppError::InvalidInput("the entry that owns this file has no durable identity".into())
     })?;
 
-    let state = load_state(pool, &candidate_uid).await?;
+    let state = books::user_state(pool, &candidate_uid).await?;
     if !state.has_state() {
         // Nothing user-authored can be misplaced. Detach the stale entry to
         // Reading history instead of merging two different byte streams, and
@@ -182,56 +158,6 @@ pub async fn locate_book(
             candidate,
             candidate_state: state,
         }),
-    })
-}
-
-async fn load_state(pool: &SqlitePool, book_uid: &str) -> Result<LocateState, AppError> {
-    let annotations: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM annotations WHERE book_uid = ?1")
-            .bind(book_uid)
-            .fetch_one(pool)
-            .await?;
-    let has_progress: bool =
-        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM reading_progress WHERE book_uid = ?1)")
-            .bind(book_uid)
-            .fetch_one(pool)
-            .await?;
-    let progress_percent: Option<f64> =
-        sqlx::query_scalar("SELECT progress_percent FROM reading_progress WHERE book_uid = ?1")
-            .bind(book_uid)
-            .fetch_optional(pool)
-            .await?
-            .flatten();
-    let collections: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM book_collections WHERE book_uid = ?1")
-            .bind(book_uid)
-            .fetch_one(pool)
-            .await?;
-    let has_metadata_overrides: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM book_metadata_overrides WHERE book_uid = ?1)",
-    )
-    .bind(book_uid)
-    .fetch_one(pool)
-    .await?;
-    let provider_links: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM book_provider_links WHERE book_uid = ?1")
-            .bind(book_uid)
-            .fetch_one(pool)
-            .await?;
-    let edition_links: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM book_edition_links WHERE book_uid_a = ?1 OR book_uid_b = ?1",
-    )
-    .bind(book_uid)
-    .fetch_one(pool)
-    .await?;
-    Ok(LocateState {
-        annotations,
-        has_progress,
-        progress_percent,
-        collections,
-        has_metadata_overrides,
-        provider_links,
-        edition_links,
     })
 }
 
@@ -316,10 +242,10 @@ mod tests {
             conflict: Box::new(LocateConflict {
                 owner: sample_book(4, "Machine Learning"),
                 candidate: sample_book(3, "Old copy"),
-                candidate_state: LocateState {
+                candidate_state: UserState {
                     annotations: 2,
                     progress_percent: Some(40.0),
-                    ..LocateState::default()
+                    ..UserState::default()
                 },
             }),
         };
