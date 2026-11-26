@@ -28,7 +28,6 @@ function joinList(items: string[]): string {
   return `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
 }
 
-/** Every kind of new state the current copy holds, in the dialog's own words. */
 function conflictSummary(conflict: RestoreConflict): string {
   const bits: string[] = [];
   if (conflict.progressPercent !== null && conflict.progressPercent !== undefined) {
