@@ -23,6 +23,39 @@ function titleOf(entry: BookTrashEntry | null): string {
   return title === undefined || title === "" ? "this book" : `"${title}"`;
 }
 
+function joinList(items: string[]): string {
+  if (items.length <= 1) return items[0] ?? "";
+  return `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
+}
+
+/** Every kind of new state the current copy holds, in the dialog's own words. */
+function conflictSummary(conflict: RestoreConflict): string {
+  const bits: string[] = [];
+  if (conflict.progressPercent !== null && conflict.progressPercent !== undefined) {
+    bits.push(`${Math.round(conflict.progressPercent)}% progress`);
+  }
+  if (conflict.annotationCount > 0) {
+    bits.push(
+      `${conflict.annotationCount} ${conflict.annotationCount === 1 ? "annotation" : "annotations"}`,
+    );
+  }
+  if (conflict.collections > 0) {
+    bits.push(
+      `${conflict.collections} collection ${conflict.collections === 1 ? "membership" : "memberships"}`,
+    );
+  }
+  if (conflict.hasMetadataOverrides) bits.push("metadata edits");
+  if (conflict.providerLinks > 0) {
+    bits.push(
+      `${conflict.providerLinks} provider ${conflict.providerLinks === 1 ? "link" : "links"}`,
+    );
+  }
+  if (conflict.editionLinks > 0) {
+    bits.push(`${conflict.editionLinks} edition ${conflict.editionLinks === 1 ? "link" : "links"}`);
+  }
+  return joinList(bits);
+}
+
 /**
  * Restore conflict (ADR 0014 D5): the fresh identity already has new progress
  * or annotations, so the user must say which state wins. Silence would merge
@@ -36,17 +69,7 @@ export function RestoreBookDialog({
   onChoose,
   onCancel,
 }: RestoreBookDialogProps) {
-  const progress =
-    conflict?.progressPercent === null || conflict?.progressPercent === undefined
-      ? null
-      : `${Math.round(conflict.progressPercent)}% progress`;
-  const annotations =
-    conflict === null
-      ? null
-      : `${conflict.annotationCount} ${
-          conflict.annotationCount === 1 ? "annotation" : "annotations"
-        }`;
-  const current = [progress, annotations].filter((part) => part !== null).join(" and ");
+  const current = conflict === null ? "" : conflictSummary(conflict);
 
   return (
     <Dialog
@@ -60,7 +83,7 @@ export function RestoreBookDialog({
           <DialogTitle>{`Restore ${titleOf(entry)}?`}</DialogTitle>
           <DialogDescription>
             {`The current copy already has new reading data${
-              current === "" ? "" : ` (${current})`
+              current === "" ? "" : `: ${current}`
             }. Choose which state the restored book keeps.`}
           </DialogDescription>
         </DialogHeader>
