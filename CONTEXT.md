@@ -40,6 +40,12 @@ forget them. The tab is "Detached records"; forgotten books have their own tab.
 _Avoid_: reading history (the old sidebar view name), archive, trash (the
 30-day restore list is the trash)
 
+**Last known path**:
+The path of the book file a detached record last had, the copy the reader
+opens. A hint for finding the file again; it is not part of the book's
+identity and never syncs.
+_Avoid_: old path, last location
+
 **Library place**:
 A destination in the sidebar: a smart section or a collection place. Selecting
 a place replaces the current place; places do not stack. Detached records are

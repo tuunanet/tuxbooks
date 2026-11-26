@@ -1,7 +1,9 @@
 # ADR 0014: Durable book records own reading state
 
 Status: accepted (amended 2026-11-22: the surface for D6 moved from a sidebar
-view into Settings → History; the projection and its guarantees are unchanged)
+view into Settings → History; the projection and its guarantees are unchanged;
+amended 2026-11-25: D5 gained the restore-with-a-picked-file rule and a wider
+definition of new state)
 Date: 2026-10-29
 Decides: what owns reading progress, annotations, collections, metadata overrides, last-opened, and provider links; what Remove, Unwatch, Reset, and Forget do; how a book is re-identified when its file returns
 Relates to: ADR 0008 (unwatch removes books), ADR 0013 (cloud-folder sync), `CONTEXT.md` (Book, Book file, Library membership, Reading history, Book identity)
@@ -120,6 +122,18 @@ Forget unlinks providers but does not ask them to delete their remote history.
 With sync enabled, Forget is a shared delete. Ordinary annotation and
 collection deletes keep their existing 30-day trash; Forget uses the same
 window for the whole book.
+
+(Amended 2026-11-25, tuxbooks-t9p: A forgotten book whose file is gone is
+restored with a file the user picks. Bytes matching one of the snapshot's
+content hashes prove the same book, and the file attaches to the restored
+record. Different bytes never merge. ADR 0019's lossless choices apply, and a
+link as a different edition leaves the old record and its annotations under
+Detached records. A picked file that already belongs to a library book takes
+the replacement's role, whether the Forget created it or a later import did.
+"New state" is every kind of user state: progress, annotations, collections,
+metadata overrides, provider links, and edition links, the same six Locate
+File counts. The sentence "a restore always has exactly one current book to
+attach to" describes only a book forgotten with a file.)
 
 ### D6. Detached records are a first-class surface
 
