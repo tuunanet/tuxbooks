@@ -121,6 +121,10 @@ pub struct BookTrashEntry {
     /// The fresh identity the file was rebound to, when the book stayed in the
     /// library at Forget time.
     pub replacement_book_id: Option<i64>,
+    /// Whether that fresh identity still holds a file row now. `false` (no
+    /// replacement, or a fileless one) reads as fileless: Restore asks the
+    /// user to choose a file.
+    pub replacement_has_file: bool,
     /// Whether that fresh identity holds any of the six kinds of user state
     /// now. Restore with `true` needs a Replace / Keep / Merge choice.
     pub has_new_state: bool,

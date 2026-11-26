@@ -151,6 +151,9 @@ export function ForgottenBookRow({
     entry.progressPercent === null
       ? "No progress"
       : `${Math.round(entry.progressPercent)}% progress`;
+  // Key on the field, not the replacement's existence: a replacement that
+  // has since lost its file reads as fileless, so Restore asks for a file.
+  const replacementHoldsFile = entry.replacementBookId !== null && entry.replacementHasFile;
   return (
     <li
       data-testid="book-trash-entry"
@@ -165,7 +168,7 @@ export function ForgottenBookRow({
           {formatDate(entry.deletedAt)} · restorable until {formatDate(entry.expiresAt)}
         </p>
         <p data-testid="book-trash-file-state" className="mt-1 text-xs text-muted-foreground">
-          {entry.replacementBookId !== null
+          {replacementHoldsFile
             ? "File is in your library"
             : "No file. Restore will ask you to choose one."}
         </p>
@@ -192,7 +195,7 @@ export function ForgottenBookRow({
           <RotateCcw data-icon="inline-start" />
           Restore
         </Button>
-        {entry.replacementBookId === null ? (
+        {replacementHoldsFile ? null : (
           <Button
             data-testid={`book-trash-restore-without-file-${entry.id}`}
             aria-label={`Restore ${displayTitle(entry)} without a file`}
@@ -203,7 +206,7 @@ export function ForgottenBookRow({
           >
             Restore without file
           </Button>
-        ) : null}
+        )}
       </div>
     </li>
   );

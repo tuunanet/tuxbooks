@@ -270,7 +270,7 @@ export function HistorySettings() {
 
   const restoreFromRow = useCallback(
     async (entry: BookTrashEntry) => {
-      if (entry.replacementBookId !== null) {
+      if (entry.replacementBookId !== null && entry.replacementHasFile) {
         await runRestore(entry);
         return;
       }

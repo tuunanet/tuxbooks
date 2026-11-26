@@ -87,6 +87,7 @@ export function makeBookTrashEntry(overrides: Partial<BookTrashEntry> = {}): Boo
     progressPercent: 42,
     annotationCount: 2,
     replacementBookId: 51,
+    replacementHasFile: true,
     hasNewState: false,
     lastKnownPath: null,
     ...overrides,

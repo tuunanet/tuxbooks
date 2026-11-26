@@ -241,7 +241,63 @@ async fn expired_trash_is_hidden_and_unrestorable() {
     assert!(restored.0 > 0, "the live entry restores under a real id");
 }
 
+/// The row must tell the truth about the replacement: a replacement that
+/// has since lost its file reads as fileless, so the renderer offers the
+/// pick flow instead of promising the library still holds a copy.
+#[tokio::test(flavor = "multi_thread")]
+async fn list_trash_reports_whether_the_replacement_still_has_a_file() {
+    let tmp = tempfile::tempdir().unwrap();
+    let pool = init_pool(&tmp.path().join("t.db")).await.unwrap();
+    let fileless_uid = "1".repeat(32);
+    let held_uid = "2".repeat(32);
+    seed_record(&pool, &fileless_uid).await;
+    seed_record(&pool, &held_uid).await;
+    sqlx::query("INSERT INTO books (book_uid, path, title) VALUES (?1, '/w/held.epub', 'Held')")
+        .bind(&held_uid)
+        .execute(&pool)
+        .await
+        .unwrap();
+    for (book_uid, replacement_uid, title) in [
+        ("a", &fileless_uid, "Fileless Replacement"),
+        ("b", &held_uid, "Held Replacement"),
+    ] {
+        sqlx::query(
+            "INSERT INTO book_trash (book_id, book_uid, replacement_book_uid, snapshot_json, deleted_at, expires_at)
+             VALUES (0, ?1, ?2, ?3, '2026-11-01T00:00:00.000Z', '2999-01-01T00:00:00.000Z')",
+        )
+        .bind(book_uid)
+        .bind(replacement_uid)
+        .bind(shared_json(replacement_uid, title))
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+    let listed = list_trash(&pool).await.unwrap();
+    assert_eq!(listed.len(), 2);
+    let fileless = listed
+        .iter()
+        .find(|entry| entry.title.as_deref() == Some("Fileless Replacement"))
+        .unwrap();
+    let held = listed
+        .iter()
+        .find(|entry| entry.title.as_deref() == Some("Held Replacement"))
+        .unwrap();
+    assert!(
+        fileless.replacement_book_id.is_some(),
+        "the replacement record still exists"
+    );
+    assert!(
+        !fileless.replacement_has_file,
+        "a replacement with no file row reads as fileless"
+    );
+    assert!(
+        held.replacement_has_file,
+        "a replacement with a file row reads as holding the file"
+    );
+}
+
 /// A trash row snapshotted before the Last known path existed stays
+
 /// readable and simply has no path (tuxbooks-t9p.1). One bad row must not
 /// fail the whole listing.
 #[tokio::test(flavor = "multi_thread")]

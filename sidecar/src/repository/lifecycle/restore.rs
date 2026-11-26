@@ -41,6 +41,10 @@ pub async fn list_trash(pool: &SqlitePool) -> Result<Vec<BookTrashEntry>, AppErr
             Some(uid) => books::durable_id_for_uid(pool, uid).await?,
             None => None,
         };
+        let replacement_has_file = match &row.replacement_book_uid {
+            Some(uid) => books::has_file_rows(pool, uid).await?,
+            None => false,
+        };
         let has_new_state = match replacement_book_id {
             Some(id) => has_new_state(pool, id).await?,
             None => false,
@@ -60,6 +64,7 @@ pub async fn list_trash(pool: &SqlitePool) -> Result<Vec<BookTrashEntry>, AppErr
                 .or(snapshot.book.progress_percent),
             annotation_count: snapshot.annotations.len() as i64,
             replacement_book_id,
+            replacement_has_file,
             has_new_state,
             last_known_path: snapshot.book.last_known_path.clone(),
         });

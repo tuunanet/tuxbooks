@@ -220,6 +220,56 @@ describe("HistorySettings", () => {
     );
   });
 
+  it("says the file left the library when the replacement lost its file", async () => {
+    renderHistory(
+      [makeReadingHistoryBook({ id: 41 })],
+      [
+        makeBookTrashEntry({
+          id: 7,
+          title: "Old Copy",
+          replacementBookId: 51,
+          replacementHasFile: false,
+        }),
+      ],
+    );
+
+    await screen.findByTestId("history-book");
+    await userEvent.click(screen.getByTestId("history-tab-forgotten"));
+
+    expect(screen.getByTestId("book-trash-file-state")).toHaveTextContent(
+      "No file. Restore will ask you to choose one.",
+    );
+    expect(screen.getByTestId("book-trash-restore-without-file-7")).toBeInTheDocument();
+  });
+
+  it("asks for a file when the replacement has since lost its own", async () => {
+    pickBookFileMock.mockResolvedValueOnce("/books/old-copy.epub");
+    renderHistory(
+      [makeReadingHistoryBook({ id: 41 })],
+      [
+        makeBookTrashEntry({
+          id: 7,
+          replacementBookId: 51,
+          replacementHasFile: false,
+        }),
+      ],
+    );
+
+    await screen.findByTestId("history-book");
+    await userEvent.click(screen.getByTestId("history-tab-forgotten"));
+    await userEvent.click(screen.getByTestId("book-trash-restore-7"));
+
+    await waitFor(() => {
+      expect(pickBookFileMock).toHaveBeenCalledWith(7);
+    });
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith("restore_book", {
+        trashId: 7,
+        pickedPath: "/books/old-copy.epub",
+      });
+    });
+  });
+
   it("says when nothing is waiting to be restored", async () => {
     renderHistory([makeReadingHistoryBook({ id: 41 })], []);
 

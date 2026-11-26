@@ -291,6 +291,8 @@ export interface BookTrashEntry {
   annotationCount: number;
   /** Fresh identity the file was rebound to, when it stayed in the library. */
   replacementBookId: number | null;
+  /** True when that replacement still holds a file row now. */
+  replacementHasFile: boolean;
   /** True when the fresh identity has progress or annotations; Restore needs a choice. */
   hasNewState: boolean;
   /** Path of the copy the reader opened, from the trash snapshot; machine-local. */
