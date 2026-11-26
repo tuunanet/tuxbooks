@@ -38,12 +38,7 @@ pub async fn list_trash(pool: &SqlitePool) -> Result<Vec<BookTrashEntry>, AppErr
             AppError::InvalidInput(format!("trash snapshot is unreadable: {err}"))
         })?;
         let replacement_book_id = match &row.replacement_book_uid {
-            Some(uid) => {
-                sqlx::query_scalar("SELECT id FROM book_records WHERE uid = ?1")
-                    .bind(uid)
-                    .fetch_optional(pool)
-                    .await?
-            }
+            Some(uid) => books::durable_id_for_uid(pool, uid).await?,
             None => None,
         };
         let has_new_state = match replacement_book_id {
@@ -114,12 +109,7 @@ pub async fn restore(
             Some(id)
         }
         None => match &row.replacement_book_uid {
-            Some(uid) => {
-                sqlx::query_scalar("SELECT id FROM book_records WHERE uid = ?1")
-                    .bind(uid)
-                    .fetch_optional(pool)
-                    .await?
-            }
+            Some(uid) => books::durable_id_for_uid(pool, uid).await?,
             None => None,
         },
     };
@@ -183,10 +173,7 @@ pub async fn restore(
     if let Some(id) = replacement_id {
         replaced_book_ids.push(id);
     }
-    let old_id: Option<i64> = sqlx::query_scalar("SELECT id FROM book_records WHERE uid = ?1")
-        .bind(&snapshot.book.uid)
-        .fetch_optional(pool)
-        .await?;
+    let old_id = books::durable_id_for_uid(pool, &snapshot.book.uid).await?;
     if let Some(id) = old_id {
         replaced_book_ids.push(id);
     }
@@ -227,10 +214,7 @@ pub async fn restore_detached(
     // The Forget-time fresh identity keeps its file and its id here, so only
     // the old record's id can move on a renderer.
     let mut replaced_book_ids: Vec<i64> = Vec::new();
-    let old_id: Option<i64> = sqlx::query_scalar("SELECT id FROM book_records WHERE uid = ?1")
-        .bind(&snapshot.book.uid)
-        .fetch_optional(pool)
-        .await?;
+    let old_id = books::durable_id_for_uid(pool, &snapshot.book.uid).await?;
     if let Some(id) = old_id {
         replaced_book_ids.push(id);
     }

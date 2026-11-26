@@ -10,9 +10,9 @@ mod tests;
 
 pub(crate) use detach::{active_path_for_uid, remember_last_known_path};
 pub use detach::{
-    delete_book, delete_file_row, discard_empty_durable_record, ensure_durable_record,
-    file_ids_for_book, has_file_rows, mark_metadata_available, relink_target,
-    set_availability_prefix, RelinkTarget,
+    delete_book, delete_file_row, discard_empty_durable_record, durable_id_for_uid,
+    ensure_durable_record, file_ids_for_book, has_file_rows, mark_metadata_available,
+    relink_target, set_availability_prefix, RelinkTarget,
 };
 pub use query::{
     books_owned_by, count_books, file_snapshot_by_path, find_books_with_size, get_book,

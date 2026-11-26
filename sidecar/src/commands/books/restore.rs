@@ -82,7 +82,7 @@ pub async fn restore_book(
                 // The publish pass projects the restore back from the mirror,
                 // and the projection can move the durable id; the uid is the
                 // stable key, so attach through the id the record holds now.
-                if let Some(current) = durable_id(&state.db, &book_uid).await? {
+                if let Some(current) = books::durable_id_for_uid(&state.db, &book_uid).await? {
                     outcome.book_id = Some(current);
                 }
                 if let Some(book_id) = outcome.book_id {
@@ -188,17 +188,6 @@ async fn publish_restore(state: &AppState) -> Result<(), AppError> {
             "could not publish the restore before attaching the file: {err}"
         ))
     })
-}
-
-/// The durable id a uid holds right now. The publish pass projects the
-/// restore echo from the mirror, and the projection can move the id the
-/// restore outcome reported; the uid is the stable key.
-async fn durable_id(pool: &sqlx::SqlitePool, book_uid: &str) -> Result<Option<i64>, AppError> {
-    let id: Option<i64> = sqlx::query_scalar("SELECT id FROM book_records WHERE uid = ?1")
-        .bind(book_uid)
-        .fetch_optional(pool)
-        .await?;
-    Ok(id)
 }
 
 /// Run the different-bytes flow (tuxbooks-t9p.3). With no mode, report the

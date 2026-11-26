@@ -35,12 +35,20 @@ pub async fn ensure_durable_record(
     .await?
     .rows_affected()
         > 0;
-    let id: i64 = sqlx::query_scalar("SELECT id FROM book_records WHERE uid = ?1")
-        .bind(book_uid)
-        .fetch_optional(pool)
+    let id = durable_id_for_uid(pool, book_uid)
         .await?
         .ok_or(AppError::NotFound)?;
     Ok((id, inserted))
+}
+
+/// The durable record id a uid holds right now. The sync projection can
+/// move the id an earlier outcome reported; the uid is the stable key.
+pub async fn durable_id_for_uid(pool: &SqlitePool, book_uid: &str) -> Result<Option<i64>, AppError> {
+    let id: Option<i64> = sqlx::query_scalar("SELECT id FROM book_records WHERE uid = ?1")
+        .bind(book_uid)
+        .fetch_optional(pool)
+        .await?;
+    Ok(id)
 }
 
 /// Remove a record a failed attach created, but only while nothing points at
