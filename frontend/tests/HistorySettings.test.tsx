@@ -275,7 +275,6 @@ describe("HistorySettings", () => {
     expect(screen.getByTestId("book-trash-file-state")).toHaveTextContent(
       "No file. Restore will ask you to choose one.",
     );
-    expect(screen.getByTestId("book-trash-restore-without-file-7")).toBeInTheDocument();
   });
 
   it("asks for a file when the replacement has since lost its own", async () => {

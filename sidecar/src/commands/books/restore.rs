@@ -12,6 +12,14 @@ pub async fn list_book_trash(state: &AppState) -> Result<Vec<BookTrashEntry>, Ap
     lifecycle::list_trash(&state.db).await
 }
 
+/// Erase one Forgotten book: the trash entry closes without restoring, so
+/// the old record and its state are gone for good. The sync mirror shares
+/// the discard through the restored_at trigger, like a Keep or Merge.
+/// `false` when the entry was already closed.
+pub async fn erase_book_trash(state: &AppState, trash_id: i64) -> Result<bool, AppError> {
+    lifecycle::erase(&state.db, trash_id).await
+}
+
 /// Restore a forgotten book, optionally with the file the user picked. The
 /// pick is validated before anything is written — the file must exist and
 /// parse, and its bytes are compared with the trash snapshot's content

@@ -135,6 +135,11 @@ metadata overrides, provider links, and edition links, the same six Locate
 File counts. The sentence "a restore always has exactly one current book to
 attach to" describes only a book forgotten with a file.)
 
+(Amended 2026-11-26, tuxbooks-cb5: A Forgotten books row offers Erase beside
+Restore. Erase discards the snapshot before its 30-day window expires, closing
+the entry with the same shared discard a Keep or Merge publishes, so the
+record and its state cannot come back on any machine.)
+
 ### D6. Detached records are a first-class surface
 
 Books with no file row appear in a dedicated **detached records** surface. It

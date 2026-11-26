@@ -259,6 +259,7 @@ export const SIDECAR_METHODS: ReadonlySet<string> = new Set([
   "forget_book",
   "forget_books",
   "list_book_trash",
+  "erase_book_trash",
   "restore_book",
   "scan_library",
   "import_paths",

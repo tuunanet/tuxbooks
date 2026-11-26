@@ -6,20 +6,16 @@ interface ForgottenBooksPaneProps {
   trash: BookTrashEntry[];
   busy: boolean;
   onRestore: (entry: BookTrashEntry) => void;
-  onRestoreWithoutFile: (entry: BookTrashEntry) => void;
+  onErase: (entry: BookTrashEntry) => void;
 }
 
 /**
  * The Forgotten books tab: restorable trash rows within their 30-day window.
  * Restoring puts the old record and its state back; a new-state book asks
  * first, and a picked file with different bytes offers only lossless choices.
+ * Erase closes a row without restoring, before its window expires.
  */
-export function ForgottenBooksPane({
-  trash,
-  busy,
-  onRestore,
-  onRestoreWithoutFile,
-}: ForgottenBooksPaneProps) {
+export function ForgottenBooksPane({ trash, busy, onRestore, onErase }: ForgottenBooksPaneProps) {
   return (
     <TabsContent
       value="forgotten"
@@ -45,7 +41,7 @@ export function ForgottenBooksPane({
                 entry={entry}
                 busy={busy}
                 onRestore={onRestore}
-                onRestoreWithoutFile={onRestoreWithoutFile}
+                onErase={onErase}
               />
             ))}
           </ul>

@@ -1,20 +1,22 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { BookMarked, Search, Trash2 } from "lucide-react";
+import { Search, Trash2 } from "lucide-react";
 import { ForgetBookDialog } from "@/components/books/ForgetBookDialog";
+import { EraseBookDialog } from "@/components/books/EraseBookDialog";
 import { ResetBookDialog } from "@/components/books/ResetBookDialog";
 import { RestoreBookDialog } from "@/components/books/RestoreBookDialog";
 import { RestoreDifferentBytesDialog } from "@/components/books/RestoreDifferentBytesDialog";
 import { ForgottenBooksPane } from "@/components/settings/ForgottenBooksPane";
+import { EmptyDetachedRecords, HistorySkeleton } from "@/components/settings/HistoryStates";
 import { HistoryBookRow } from "@/components/history/ReadingHistoryRows";
 import { useHistoryVirtualizer } from "@/components/history/useHistoryVirtualizer";
 import { VirtualRow } from "@/components/library/LibraryRow";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
-import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { EVENT_FLUSH_MS, useLibrary } from "@/hooks/useLibrary";
 import {
+  eraseBookTrash,
   forgetBook,
   forgetBooks,
   listBookTrash,
@@ -39,52 +41,9 @@ function toMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-function EmptyDetachedRecords({ searching }: { searching: boolean }) {
-  return (
-    <div
-      data-testid="history-empty"
-      className="flex h-64 flex-col items-center justify-center gap-3 text-center"
-    >
-      <BookMarked aria-hidden="true" className="h-12 w-12 text-muted-foreground" />
-      <h3 className="text-lg font-semibold">
-        {searching ? "No books match that search" : "No detached records"}
-      </h3>
-      <p className="max-w-md text-sm text-muted-foreground">
-        {searching
-          ? "Detached records only cover books whose file is no longer in a watched folder."
-          : "When a book leaves your watched folders, TuxBooks keeps its progress, annotations, collections, and metadata here. Relink a file and the book returns to the library with that reading history intact."}
-      </p>
-    </div>
-  );
-}
-
-function HistorySkeleton() {
-  return (
-    <div data-testid="history-loading" role="status" aria-label="Loading history">
-      {Array.from({ length: 4 }, (_, index) => (
-        <div key={index} className="flex items-center gap-4 rounded-lg border p-3">
-          <Skeleton className="size-4 rounded" />
-          <Skeleton className="h-20 w-14 rounded-lg" />
-          <div className="flex-1 space-y-2">
-            <Skeleton className="h-4 w-1/3" />
-            <Skeleton className="h-3 w-1/4" />
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
 /**
- * The History section (ADR 0014 D6): durable books with no current file, plus
- * the 30-day restore list. The library stays membership-only, so this is the
- * only surface that shows detached records. It reads the durable metadata
- * snapshot plus the live progress and annotation count, searches through the
- * same FTS index as the library, relinks a chosen file, offers single and
- * bulk Forget, and restores forgotten books from the trash.
- *
- * Both tabs share one load loop and one set of dialogs, so forgetting on one
- * tab refreshes the other without a remount.
+ * The History section (ADR 0014 D6). Both tabs share one load loop and one
+ * set of dialogs, so forgetting on one tab refreshes the other without a remount.
  */
 /** One bundle for the restore flow: the entry, its pick, and either dialog's payload. */
 interface RestoreFlow {
@@ -112,11 +71,11 @@ export function HistorySettings() {
   const [resetTarget, setResetTarget] = useState<ReadingHistoryBook | null>(null);
   const [forgetTargets, setForgetTargets] = useState<number[] | null>(null);
   const [restoreFlow, setRestoreFlow] = useState<RestoreFlow>(idleRestoreFlow);
-  const [restoreBusy, setRestoreBusy] = useState(false);
+  const [trashBusy, setTrashBusy] = useState(false);
+  const [eraseTarget, setEraseTarget] = useState<BookTrashEntry | null>(null);
   const requestRef = useRef(0);
   const queryRef = useRef("");
 
-  // Set membership keeps per-row selection checks O(n), not O(n²).
   const selectedSet = useMemo(() => new Set(selected), [selected]);
 
   // The DOM holds the visible window plus overscan, never one node per book.
@@ -246,7 +205,7 @@ export function HistorySettings() {
 
   const runRestore = useCallback(
     async (entry: BookTrashEntry, mode?: RestoreMode, pickedPath?: string) => {
-      setRestoreBusy(true);
+      setTrashBusy(true);
       setError(null);
       try {
         const outcome = await restoreBook(entry.id, mode, pickedPath);
@@ -273,7 +232,7 @@ export function HistorySettings() {
       } catch (err) {
         setError(toMessage(err));
       } finally {
-        setRestoreBusy(false);
+        setTrashBusy(false);
       }
     },
     [refresh, load, loadTrash],
@@ -291,6 +250,22 @@ export function HistorySettings() {
     },
     [runRestore],
   );
+
+  const confirmErase = useCallback(async () => {
+    const target = eraseTarget;
+    setEraseTarget(null);
+    if (target === null) return;
+    setTrashBusy(true);
+    setError(null);
+    try {
+      await eraseBookTrash(target.id);
+    } catch (err) {
+      setError(toMessage(err));
+    }
+    // The entry is gone on success and still there on failure; show what is real.
+    await loadTrash();
+    setTrashBusy(false);
+  }, [eraseTarget, loadTrash]);
 
   const toggleSelected = useCallback((bookId: number, next: boolean) => {
     setSelected((current) =>
@@ -447,9 +422,9 @@ export function HistorySettings() {
 
         <ForgottenBooksPane
           trash={trash}
-          busy={restoreBusy}
+          busy={trashBusy}
           onRestore={(target) => void restoreFromRow(target)}
-          onRestoreWithoutFile={(target) => void runRestore(target)}
+          onErase={(target) => setEraseTarget(target)}
         />
       </Tabs>
 
@@ -466,11 +441,17 @@ export function HistorySettings() {
         onConfirm={() => void confirmForget()}
         onCancel={() => setForgetTargets(null)}
       />
+      <EraseBookDialog
+        open={eraseTarget !== null}
+        title={eraseTarget?.title ?? undefined}
+        onConfirm={() => void confirmErase()}
+        onCancel={() => setEraseTarget(null)}
+      />
       <RestoreBookDialog
         open={restoreFlow.target !== null && restoreFlow.conflict !== null}
         entry={restoreFlow.target}
         conflict={restoreFlow.conflict}
-        busy={restoreBusy}
+        busy={trashBusy}
         onChoose={(mode) => {
           if (restoreFlow.target) void runRestore(restoreFlow.target, mode, restoreFlow.pick);
         }}
@@ -485,7 +466,7 @@ export function HistorySettings() {
                 ?.title ?? null)
             : null
         }
-        busy={restoreBusy}
+        busy={trashBusy}
         onChoose={(mode) => {
           if (restoreFlow.target) void runRestore(restoreFlow.target, mode, restoreFlow.pick);
         }}

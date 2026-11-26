@@ -29,6 +29,7 @@ const EXPORT_SURFACE = [
   "dismissAllSyncIssues",
   "dismissSyncIssue",
   "embedBookMetadata",
+  "eraseBookTrash",
   "forgetAllWaitingBooks",
   "forgetBook",
   "forgetBooks",

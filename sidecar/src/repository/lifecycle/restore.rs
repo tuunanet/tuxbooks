@@ -1,5 +1,5 @@
-//! List the 30-day trash and restore one entry, replacing the identity the
-//! Forget left in the library.
+//! List the 30-day trash and close one entry: restore it under the identity
+//! the Forget left in the library, or erase it for good.
 
 use sqlx::SqlitePool;
 
@@ -196,6 +196,23 @@ pub async fn restore(
         conflict: None,
         different_bytes: None,
     })
+}
+
+/// Erase one open trash entry: the snapshot closes without restoring, so the
+/// old record and its state are gone for good (the row button next to
+/// Restore). Setting `restored_at` fires the sync trigger, which publishes
+/// the discard like a Keep or Merge and closes the entry on every machine.
+/// `false` when the entry was already closed.
+pub async fn erase(pool: &SqlitePool, trash_id: i64) -> Result<bool, AppError> {
+    let result = sqlx::query(
+        "UPDATE book_trash SET restored_at = ?2, resolution = 'discard'
+         WHERE id = ?1 AND restored_at IS NULL",
+    )
+    .bind(trash_id)
+    .bind(now())
+    .execute(pool)
+    .await?;
+    Ok(result.rows_affected() > 0)
 }
 
 /// Restore the entry detached, for the lossless different-bytes choices

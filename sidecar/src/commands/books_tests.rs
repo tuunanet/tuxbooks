@@ -148,6 +148,55 @@ async fn forget_and_restore_announce_the_ids_that_died() {
     );
 }
 
+/// Erase closes the trash entry without restoring: the entry leaves the
+/// list, a late restore reports NotFound, the fresh identity keeps the
+/// file, and a second erase finds nothing left to close.
+#[tokio::test(flavor = "multi_thread")]
+async fn erase_book_trash_closes_the_entry_without_restoring() {
+    let tmp = tempfile::tempdir().unwrap();
+    let state = test_state(tmp.path()).await;
+    let (events, _fired) = capturing_events();
+    let (book_id, _) = seed_book(&state, "roundtrip.epub", "erase").await;
+
+    let forgotten = forget_book(&state, &events, book_id).await.unwrap();
+    let fresh_id = forgotten
+        .replacement_book_id
+        .expect("a file-backed forget keeps a fresh identity");
+
+    let erased = erase_book_trash(&state, forgotten.trash_id).await.unwrap();
+    assert!(erased, "an open entry erases");
+
+    let trash = list_book_trash(&state).await.unwrap();
+    assert!(
+        trash.iter().all(|entry| entry.id != forgotten.trash_id),
+        "the erased entry leaves the trash list"
+    );
+    let restored = restore_book(&state, &events, forgotten.trash_id, None, None)
+        .await
+        .unwrap();
+    assert_eq!(restored.status, RestoreStatus::NotFound);
+
+    let fresh_uid: String = sqlx::query_scalar("SELECT uid FROM book_records WHERE id = ?1")
+        .bind(fresh_id)
+        .fetch_one(&state.db)
+        .await
+        .unwrap();
+    assert!(
+        books::has_file_rows(&state.db, &fresh_uid).await.unwrap(),
+        "the fresh identity keeps the file"
+    );
+    let resolution: Option<String> =
+        sqlx::query_scalar("SELECT resolution FROM book_trash WHERE id = ?1")
+            .bind(forgotten.trash_id)
+            .fetch_one(&state.db)
+            .await
+            .unwrap();
+    assert_eq!(resolution.as_deref(), Some("discard"));
+
+    let again = erase_book_trash(&state, forgotten.trash_id).await.unwrap();
+    assert!(!again, "a closed entry has nothing left to erase");
+}
+
 /// SQLITE_BUSY-shaped error for driving the retry branches without a
 /// database. The code and the message both match
 /// `is_transient_contention`.

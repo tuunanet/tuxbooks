@@ -284,6 +284,10 @@ function validateSyncId(record: Record<string, unknown>): void {
   requirePositiveId(record.id, "sync id");
 }
 
+function validateTrashId(record: Record<string, unknown>): void {
+  requirePositiveId(record.trashId, "trashId");
+}
+
 function validateSyncDeviceName(record: Record<string, unknown>): void {
   const name = record.name;
   if (typeof name !== "string" || name.trim().length === 0 || name.length > 80) {
@@ -378,6 +382,7 @@ const METHOD_SHAPES = new Map<string, ShapeCheck>([
   ["rename_collection", validateCollectionRename],
   ["forget_books", validateForgetBooks],
   ["restore_book", validateRestoreBook],
+  ["erase_book_trash", validateTrashId],
   ["sync_dismiss_issue", validateSyncId],
   ["sync_retry_issue", validateSyncId],
   ["sync_restore", validateSyncId],
