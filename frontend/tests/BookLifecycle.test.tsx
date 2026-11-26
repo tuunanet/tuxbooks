@@ -371,7 +371,7 @@ describe("History Forget and restore", () => {
     expect(screen.queryByTestId("restore-book-dialog")).not.toBeInTheDocument();
   });
 
-  it("surfaces a different-bytes report in the error box and keeps the entry open", async () => {
+  it("opens the lossless-choices dialog on a different-bytes report", async () => {
     pickBookFileMock.mockResolvedValueOnce("/books/other.epub");
     mockInvoke({
       ...baseResponses([], [makeBookTrashEntry({ id: 7, replacementBookId: null })]),
@@ -398,11 +398,8 @@ describe("History Forget and restore", () => {
     await openForgottenTab(7);
     await userEvent.click(screen.getByTestId("book-trash-restore-7"));
 
-    await waitFor(() => {
-      expect(pickBookFileMock).toHaveBeenCalledWith(7);
-    });
-    const error = await screen.findByTestId("history-error");
-    expect(error).toHaveTextContent("not the one this book had");
+    const dialog = await screen.findByTestId("restore-different-bytes-dialog");
+    expect(dialog).toHaveTextContent("not the one");
     expect(screen.getByTestId("book-trash-restore-7")).toBeInTheDocument();
     expect(screen.queryByTestId("restore-book-dialog")).not.toBeInTheDocument();
     // Nothing was consumed: no refresh ran after the report.

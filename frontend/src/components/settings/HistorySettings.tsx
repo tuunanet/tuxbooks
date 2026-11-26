@@ -3,7 +3,9 @@ import { BookMarked, Search, Trash2 } from "lucide-react";
 import { ForgetBookDialog } from "@/components/books/ForgetBookDialog";
 import { ResetBookDialog } from "@/components/books/ResetBookDialog";
 import { RestoreBookDialog } from "@/components/books/RestoreBookDialog";
-import { ForgottenBookRow, HistoryBookRow } from "@/components/history/ReadingHistoryRows";
+import { RestoreDifferentBytesDialog } from "@/components/books/RestoreDifferentBytesDialog";
+import { ForgottenBooksPane } from "@/components/settings/ForgottenBooksPane";
+import { HistoryBookRow } from "@/components/history/ReadingHistoryRows";
 import { useHistoryVirtualizer } from "@/components/history/useHistoryVirtualizer";
 import { VirtualRow } from "@/components/library/LibraryRow";
 import { Button } from "@/components/ui/button";
@@ -26,6 +28,7 @@ import {
   type BookTrashEntry,
   type ReadingHistoryBook,
   type RestoreConflict,
+  type RestoreDifferentBytes,
   type RestoreMode,
 } from "@/lib/bridge";
 
@@ -72,15 +75,6 @@ function HistorySkeleton() {
   );
 }
 
-function EmptyForgottenBooks() {
-  return (
-    <p data-testid="history-forgotten-empty" className="text-sm text-muted-foreground">
-      Nothing is waiting to be restored. Forgotten books appear here and stay restorable for 30
-      days.
-    </p>
-  );
-}
-
 /**
  * The History section (ADR 0014 D6): durable books with no current file, plus
  * the 30-day restore list. The library stays membership-only, so this is the
@@ -93,7 +87,7 @@ function EmptyForgottenBooks() {
  * tab refreshes the other without a remount.
  */
 export function HistorySettings() {
-  const { refresh } = useLibrary();
+  const { refresh, books: libraryBooks } = useLibrary();
   const [books, setBooks] = useState<ReadingHistoryBook[] | null>(null);
   const [trash, setTrash] = useState<BookTrashEntry[]>([]);
   const [query, setQuery] = useState("");
@@ -105,6 +99,9 @@ export function HistorySettings() {
   const [restoreTarget, setRestoreTarget] = useState<BookTrashEntry | null>(null);
   const [restorePick, setRestorePick] = useState<string | undefined>(undefined);
   const [restoreConflict, setRestoreConflict] = useState<RestoreConflict | null>(null);
+  const [restoreDifferentBytes, setRestoreDifferentBytes] = useState<RestoreDifferentBytes | null>(
+    null,
+  );
   const [restoreBusy, setRestoreBusy] = useState(false);
   const requestRef = useRef(0);
   const queryRef = useRef("");
@@ -247,17 +244,20 @@ export function HistorySettings() {
           setRestoreTarget(entry);
           setRestorePick(pickedPath);
           setRestoreConflict(outcome.conflict);
+          setRestoreDifferentBytes(null);
           return;
         }
         if (outcome.status === "different_bytes") {
-          setError(
-            "The picked file is not the one this book had, so nothing was attached; the trash entry is unchanged.",
-          );
+          setRestoreTarget(entry);
+          setRestorePick(pickedPath);
+          setRestoreConflict(null);
+          setRestoreDifferentBytes(outcome.differentBytes);
           return;
         }
         setRestoreTarget(null);
         setRestorePick(undefined);
         setRestoreConflict(null);
+        setRestoreDifferentBytes(null);
         await Promise.all([refresh(), load(queryRef.current), loadTrash()]);
       } catch (err) {
         setError(toMessage(err));
@@ -435,29 +435,12 @@ export function HistorySettings() {
           </section>
         </TabsContent>
 
-        <TabsContent value="forgotten" forceMount className="mt-4">
-          <section data-testid="recently-forgotten" className="flex flex-col gap-3">
-            <p className="text-sm text-muted-foreground">
-              Forgotten books stay restorable for 30 days. Restoring puts the old record and its
-              state back; if the current book has new reading data, TuxBooks asks first.
-            </p>
-            {trash.length === 0 ? (
-              <EmptyForgottenBooks />
-            ) : (
-              <ul className="flex flex-col gap-2">
-                {trash.map((entry) => (
-                  <ForgottenBookRow
-                    key={entry.id}
-                    entry={entry}
-                    busy={restoreBusy}
-                    onRestore={(target) => void restoreFromRow(target)}
-                    onRestoreWithoutFile={(target) => void runRestore(target)}
-                  />
-                ))}
-              </ul>
-            )}
-          </section>
-        </TabsContent>
+        <ForgottenBooksPane
+          trash={trash}
+          busy={restoreBusy}
+          onRestore={(target) => void restoreFromRow(target)}
+          onRestoreWithoutFile={(target) => void runRestore(target)}
+        />
       </Tabs>
 
       <ResetBookDialog
@@ -485,6 +468,26 @@ export function HistorySettings() {
           setRestoreTarget(null);
           setRestorePick(undefined);
           setRestoreConflict(null);
+        }}
+      />
+      <RestoreDifferentBytesDialog
+        open={restoreDifferentBytes !== null}
+        report={restoreDifferentBytes}
+        ownerTitle={
+          restoreDifferentBytes?.ownerBookId != null
+            ? (libraryBooks?.find((book) => book.id === restoreDifferentBytes.ownerBookId)?.title ??
+              null)
+            : null
+        }
+        busy={restoreBusy}
+        onChoose={(mode) => {
+          if (restoreTarget) void runRestore(restoreTarget, mode, restorePick);
+        }}
+        onCancel={() => {
+          setRestoreTarget(null);
+          setRestorePick(undefined);
+          setRestoreConflict(null);
+          setRestoreDifferentBytes(null);
         }}
       />
     </div>
