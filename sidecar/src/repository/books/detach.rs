@@ -43,7 +43,10 @@ pub async fn ensure_durable_record(
 
 /// The durable record id a uid holds right now. The sync projection can
 /// move the id an earlier outcome reported; the uid is the stable key.
-pub async fn durable_id_for_uid(pool: &SqlitePool, book_uid: &str) -> Result<Option<i64>, AppError> {
+pub async fn durable_id_for_uid(
+    pool: &SqlitePool,
+    book_uid: &str,
+) -> Result<Option<i64>, AppError> {
     let id: Option<i64> = sqlx::query_scalar("SELECT id FROM book_records WHERE uid = ?1")
         .bind(book_uid)
         .fetch_optional(pool)
