@@ -86,6 +86,21 @@ function HistorySkeleton() {
  * Both tabs share one load loop and one set of dialogs, so forgetting on one
  * tab refreshes the other without a remount.
  */
+/** One bundle for the restore flow: the entry, its pick, and either dialog's payload. */
+interface RestoreFlow {
+  target: BookTrashEntry | null;
+  pick: string | undefined;
+  conflict: RestoreConflict | null;
+  differentBytes: RestoreDifferentBytes | null;
+}
+
+const idleRestoreFlow: RestoreFlow = {
+  target: null,
+  pick: undefined,
+  conflict: null,
+  differentBytes: null,
+};
+
 export function HistorySettings() {
   const { refresh, books: libraryBooks } = useLibrary();
   const [books, setBooks] = useState<ReadingHistoryBook[] | null>(null);
@@ -96,12 +111,7 @@ export function HistorySettings() {
   const [busyId, setBusyId] = useState<number | null>(null);
   const [resetTarget, setResetTarget] = useState<ReadingHistoryBook | null>(null);
   const [forgetTargets, setForgetTargets] = useState<number[] | null>(null);
-  const [restoreTarget, setRestoreTarget] = useState<BookTrashEntry | null>(null);
-  const [restorePick, setRestorePick] = useState<string | undefined>(undefined);
-  const [restoreConflict, setRestoreConflict] = useState<RestoreConflict | null>(null);
-  const [restoreDifferentBytes, setRestoreDifferentBytes] = useState<RestoreDifferentBytes | null>(
-    null,
-  );
+  const [restoreFlow, setRestoreFlow] = useState<RestoreFlow>(idleRestoreFlow);
   const [restoreBusy, setRestoreBusy] = useState(false);
   const requestRef = useRef(0);
   const queryRef = useRef("");
@@ -241,23 +251,24 @@ export function HistorySettings() {
       try {
         const outcome = await restoreBook(entry.id, mode, pickedPath);
         if (outcome.status === "conflict") {
-          setRestoreTarget(entry);
-          setRestorePick(pickedPath);
-          setRestoreConflict(outcome.conflict);
-          setRestoreDifferentBytes(null);
+          setRestoreFlow({
+            target: entry,
+            pick: pickedPath,
+            conflict: outcome.conflict,
+            differentBytes: null,
+          });
           return;
         }
         if (outcome.status === "different_bytes") {
-          setRestoreTarget(entry);
-          setRestorePick(pickedPath);
-          setRestoreConflict(null);
-          setRestoreDifferentBytes(outcome.differentBytes);
+          setRestoreFlow({
+            target: entry,
+            pick: pickedPath,
+            conflict: null,
+            differentBytes: outcome.differentBytes,
+          });
           return;
         }
-        setRestoreTarget(null);
-        setRestorePick(undefined);
-        setRestoreConflict(null);
-        setRestoreDifferentBytes(null);
+        setRestoreFlow(idleRestoreFlow);
         await Promise.all([refresh(), load(queryRef.current), loadTrash()]);
       } catch (err) {
         setError(toMessage(err));
@@ -275,7 +286,7 @@ export function HistorySettings() {
         return;
       }
       const pickedPath = await pickBookFile(entry.id);
-      if (pickedPath === null || pickedPath.trim() === "") return;
+      if (pickedPath === null) return;
       await runRestore(entry, undefined, pickedPath);
     },
     [runRestore],
@@ -457,38 +468,29 @@ export function HistorySettings() {
         onCancel={() => setForgetTargets(null)}
       />
       <RestoreBookDialog
-        open={restoreTarget !== null && restoreConflict !== null}
-        entry={restoreTarget}
-        conflict={restoreConflict}
+        open={restoreFlow.target !== null && restoreFlow.conflict !== null}
+        entry={restoreFlow.target}
+        conflict={restoreFlow.conflict}
         busy={restoreBusy}
         onChoose={(mode) => {
-          if (restoreTarget) void runRestore(restoreTarget, mode, restorePick);
+          if (restoreFlow.target) void runRestore(restoreFlow.target, mode, restoreFlow.pick);
         }}
-        onCancel={() => {
-          setRestoreTarget(null);
-          setRestorePick(undefined);
-          setRestoreConflict(null);
-        }}
+        onCancel={() => setRestoreFlow(idleRestoreFlow)}
       />
       <RestoreDifferentBytesDialog
-        open={restoreDifferentBytes !== null}
-        report={restoreDifferentBytes}
+        open={restoreFlow.differentBytes !== null}
+        report={restoreFlow.differentBytes}
         ownerTitle={
-          restoreDifferentBytes?.ownerBookId != null
-            ? (libraryBooks?.find((book) => book.id === restoreDifferentBytes.ownerBookId)?.title ??
-              null)
+          restoreFlow.differentBytes?.ownerBookId != null
+            ? (libraryBooks?.find((book) => book.id === restoreFlow.differentBytes?.ownerBookId)
+                ?.title ?? null)
             : null
         }
         busy={restoreBusy}
         onChoose={(mode) => {
-          if (restoreTarget) void runRestore(restoreTarget, mode, restorePick);
+          if (restoreFlow.target) void runRestore(restoreFlow.target, mode, restoreFlow.pick);
         }}
-        onCancel={() => {
-          setRestoreTarget(null);
-          setRestorePick(undefined);
-          setRestoreConflict(null);
-          setRestoreDifferentBytes(null);
-        }}
+        onCancel={() => setRestoreFlow(idleRestoreFlow)}
       />
     </div>
   );

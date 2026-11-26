@@ -8,6 +8,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import type { BookTrashEntry, RestoreConflict, RestoreMode } from "@/types/domain";
+import { joinList } from "./joinList";
 
 interface RestoreBookDialogProps {
   open: boolean;
@@ -21,11 +22,6 @@ interface RestoreBookDialogProps {
 function titleOf(entry: BookTrashEntry | null): string {
   const title = entry?.title?.trim();
   return title === undefined || title === "" ? "this book" : `"${title}"`;
-}
-
-function joinList(items: string[]): string {
-  if (items.length <= 1) return items[0] ?? "";
-  return `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
 }
 
 function conflictSummary(conflict: RestoreConflict): string {

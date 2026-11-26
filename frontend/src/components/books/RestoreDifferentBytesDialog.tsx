@@ -8,6 +8,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import type { RestoreDifferentBytes, RestoreMode } from "@/types/domain";
+import { joinList } from "./joinList";
 
 interface RestoreDifferentBytesDialogProps {
   open: boolean;
@@ -17,11 +18,6 @@ interface RestoreDifferentBytesDialogProps {
   busy: boolean;
   onChoose: (mode: RestoreMode) => void;
   onCancel: () => void;
-}
-
-function joinList(items: string[]): string {
-  if (items.length <= 1) return items[0] ?? "";
-  return `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
 }
 
 /** What the forgotten snapshot still keeps, in the dialog's own words. */
