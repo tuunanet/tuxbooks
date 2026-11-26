@@ -44,15 +44,11 @@ describe("validateInvokeParams (T-5, T-6, T-7)", () => {
 
   it("rejects unknown methods and non-object params", () => {
     expect(() => validateInvokeParams("fs_read", {}, new IssuedPaths())).toThrow(/not allowed/);
-    expect(() => validateInvokeParams("list_books", null, new IssuedPaths())).toThrow(
-      /params must be an object/,
-    );
-    expect(() => validateInvokeParams("list_books", [1], new IssuedPaths())).toThrow(
-      /params must be an object/,
-    );
-    expect(() => validateInvokeParams("list_books", "x", new IssuedPaths())).toThrow(
-      /params must be an object/,
-    );
+    for (const params of [null, [1], "x"]) {
+      expect(() => validateInvokeParams("list_books", params, new IssuedPaths())).toThrow(
+        /params must be an object/,
+      );
+    }
   });
 
   it("rejects oversized param payloads", () => {
@@ -154,7 +150,7 @@ describe("validateInvokeParams (T-5, T-6, T-7)", () => {
       ).toThrow(/join or start new/);
     });
 
-    it("validates the sync id and device name methods and allows sync_set_auto_retry", () => {
+    it("validates the sync id, device name, auto-retry, and diagnostics methods", () => {
       expect(() => validateInvokeParams("sync_restore", { id: 1 }, issued())).not.toThrow();
       expect(() => validateInvokeParams("sync_retry_issue", { id: 2 }, issued())).not.toThrow();
       expect(() => validateInvokeParams("sync_retry_issue", { id: 0 }, issued())).toThrow(
@@ -172,9 +168,6 @@ describe("validateInvokeParams (T-5, T-6, T-7)", () => {
       expect(() =>
         validateInvokeParams("sync_set_auto_retry", { enabled: false }, issued()),
       ).not.toThrow();
-    });
-
-    it("accepts the no-parameter diagnostics command", () => {
       expect(() => validateInvokeParams("sync_diagnostics", {}, issued())).not.toThrow();
     });
 
@@ -211,6 +204,12 @@ describe("validateInvokeParams (T-5, T-6, T-7)", () => {
         validateInvokeParams("restore_book", { trashId: 1, mode: "sideways" }, issued()),
       ).toThrow(/invalid restore mode/);
       expect(() => validateInvokeParams("restore_book", { trashId: 0 }, issued())).toThrow(
+        /invalid trashId/,
+      );
+      expect(() =>
+        validateInvokeParams("erase_book_trash", { trashId: 1 }, issued()),
+      ).not.toThrow();
+      expect(() => validateInvokeParams("erase_book_trash", { trashId: 0 }, issued())).toThrow(
         /invalid trashId/,
       );
     });

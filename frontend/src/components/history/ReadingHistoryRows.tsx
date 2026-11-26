@@ -138,15 +138,10 @@ interface ForgottenBookRowProps {
   entry: BookTrashEntry;
   busy: boolean;
   onRestore: (entry: BookTrashEntry) => void;
-  onRestoreWithoutFile: (entry: BookTrashEntry) => void;
+  onErase: (entry: BookTrashEntry) => void;
 }
 
-export function ForgottenBookRow({
-  entry,
-  busy,
-  onRestore,
-  onRestoreWithoutFile,
-}: ForgottenBookRowProps) {
+export function ForgottenBookRow({ entry, busy, onRestore, onErase }: ForgottenBookRowProps) {
   const progress =
     entry.progressPercent === null
       ? "No progress"
@@ -183,7 +178,18 @@ export function ForgottenBookRow({
           </p>
         ) : null}
       </div>
-      <div className="flex shrink-0 flex-col items-end gap-2">
+      <div className="flex shrink-0 gap-2">
+        <Button
+          data-testid={`book-trash-erase-${entry.id}`}
+          aria-label={`Erase ${displayTitle(entry)}`}
+          variant="outline"
+          size="sm"
+          disabled={busy}
+          onClick={() => onErase(entry)}
+        >
+          <Trash2 data-icon="inline-start" />
+          Erase…
+        </Button>
         <Button
           data-testid={`book-trash-restore-${entry.id}`}
           aria-label={`Restore ${displayTitle(entry)}`}
@@ -195,18 +201,6 @@ export function ForgottenBookRow({
           <RotateCcw data-icon="inline-start" />
           Restore
         </Button>
-        {replacementHoldsFile ? null : (
-          <Button
-            data-testid={`book-trash-restore-without-file-${entry.id}`}
-            aria-label={`Restore ${displayTitle(entry)} without a file`}
-            variant="ghost"
-            size="sm"
-            disabled={busy}
-            onClick={() => onRestoreWithoutFile(entry)}
-          >
-            Restore without file
-          </Button>
-        )}
       </div>
     </li>
   );

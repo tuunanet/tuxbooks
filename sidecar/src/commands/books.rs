@@ -362,7 +362,7 @@ async fn emit_forget(
 
 mod restore;
 
-pub use restore::{list_book_trash, restore_book};
+pub use restore::{erase_book_trash, list_book_trash, restore_book};
 
 #[cfg(test)]
 #[path = "books_tests.rs"]

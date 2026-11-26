@@ -159,10 +159,7 @@ export function resetBookReadingData(bookId: number): Promise<boolean> {
   return invoke("reset_book_reading_data", { bookId });
 }
 
-/**
- * Retry the content-hash pass now instead of waiting for its backoff;
- * resolves with the state afterwards, so the caller keeps the warning.
- */
+/** Retry the content-hash pass now instead of waiting for its backoff. */
 export function retryIndexing(bookId: number): Promise<IndexingRetry> {
   return invoke("retry_indexing", { bookId });
 }
@@ -171,10 +168,7 @@ export function forgetBook(bookId: number): Promise<ForgetOutcome> {
   return invoke("forget_book", { bookId });
 }
 
-/**
- * The main process rejects one forget_books invoke over MAX_BULK_BOOK_IDS ids;
- * a failed chunk rejects and leaves the earlier chunks forgotten.
- */
+/** Over MAX_BULK_BOOK_IDS ids one invoke rejects and leaves earlier chunks forgotten. */
 export async function forgetBooks(bookIds: number[]): Promise<BulkForgetOutcome> {
   if (bookIds.length <= MAX_BULK_BOOK_IDS) {
     return invoke("forget_books", { bookIds });
@@ -191,6 +185,11 @@ export async function forgetBooks(bookIds: number[]): Promise<BulkForgetOutcome>
 
 export function listBookTrash(): Promise<BookTrashEntry[]> {
   return invoke("list_book_trash");
+}
+
+/** Erase a Forgotten book: the trash entry closes and the record is gone. */
+export function eraseBookTrash(trashId: number): Promise<boolean> {
+  return invoke("erase_book_trash", { trashId });
 }
 
 /** Restore a Forgotten book; `pickedPath` restores with the picked file. */

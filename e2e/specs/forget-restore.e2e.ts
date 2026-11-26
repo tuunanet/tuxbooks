@@ -10,7 +10,8 @@ import { ensureLibrary, closeSettings, openHistory, waitForLibraryView } from ".
  * Replace / Keep / Merge choice; Merge keeps the newer progress and both
  * annotations. The restore-with-a-file journeys (tuxbooks-t9p.6) run after
  * that test: they re-seed from the library and depend on an empty trash, and
- * the last one deliberately leaves the EPUB detached.
+ * the last one erases its entry, then re-imports a fresh copy so the seeded
+ * five-book library stays pinned.
  */
 interface LibraryBook {
   id: number;
@@ -244,7 +245,6 @@ test.describe("forget and restore", () => {
       "No file. Restore will ask you to choose one.",
     );
     await expect(row.getByTestId("book-trash-was-at")).toContainText(`Was at ${seed.path}`);
-    await expect(row.getByTestId(`book-trash-restore-without-file-${seed.trashId}`)).toBeVisible();
 
     await stubBookFileDialog(electronApp, seed.path);
     try {
@@ -275,7 +275,7 @@ test.describe("forget and restore", () => {
     expect(annotations).toHaveLength(seed.annotationsBefore + 1);
   });
 
-  test("Restore without file returns the record to Detached records", async ({ page }) => {
+  test("Erase removes the forgotten record permanently", async ({ page }) => {
     await ensureLibrary(page);
     const seed = await seedForgottenEntry(page);
     await openHistory(page);
@@ -283,14 +283,23 @@ test.describe("forget and restore", () => {
     const row = page.getByTestId("book-trash-entry").filter({ hasText: seededBookTitles.epub });
     await expect(row).toHaveCount(1, { timeout: 30000 });
 
-    await row.getByTestId(`book-trash-restore-without-file-${seed.trashId}`).click();
+    await row.getByTestId(`book-trash-erase-${seed.trashId}`).click();
+    await page.getByTestId("erase-book-confirm").click();
 
     await expect(row).toHaveCount(0, { timeout: 30000 });
-    const detached = page.getByTestId("history-book").filter({ hasText: seededBookTitles.epub });
-    await expect(detached).toHaveCount(1, { timeout: 30000 });
+    const trash = await invoke<BookTrashEntry[]>(page, "list_book_trash", {});
+    expect(trash).toHaveLength(0);
     const inLibrary = (await invoke<LibraryBook[]>(page, "list_books", {})).some(
       (candidate) => candidate.path === seed.path,
     );
     expect(inLibrary).toBe(false);
+
+    // Later suites pin the seeded five-book library; put a fresh copy back.
+    await page.evaluate(async (path) => {
+      await window.tuxbooks!.invoke("import_paths", { paths: [path] });
+    }, seed.path);
+    await expect(page.locator(`[aria-label="${seededBookTitles.epub} (EPUB)"]`)).toHaveCount(1, {
+      timeout: 30000,
+    });
   });
 });

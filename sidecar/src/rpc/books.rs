@@ -41,6 +41,12 @@ struct RestoreBookArgs {
 
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct TrashIdArgs {
+    trash_id: i64,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct QueryArgs {
     query: String,
 }
@@ -189,6 +195,12 @@ pub(super) async fn dispatch(
             ))))
         }
         "list_book_trash" => Ok(Some(call!(commands::books::list_book_trash(state)))),
+        "erase_book_trash" => {
+            let p: TrashIdArgs = parse_params(params)?;
+            Ok(Some(call!(commands::books::erase_book_trash(
+                state, p.trash_id
+            ))))
+        }
         "restore_book" => {
             let p: RestoreBookArgs = parse_params(params)?;
             Ok(Some(call!(commands::books::restore_book(

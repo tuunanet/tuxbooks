@@ -3,6 +3,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { ForgetBookDialog } from "@/components/books/ForgetBookDialog";
+import { EraseBookDialog } from "@/components/books/EraseBookDialog";
 import { ResetBookDialog } from "@/components/books/ResetBookDialog";
 import { RestoreBookDialog } from "@/components/books/RestoreBookDialog";
 import { HistorySettings } from "@/components/settings/HistorySettings";
@@ -72,6 +73,20 @@ describe("Reset and Forget dialogs", () => {
     expect(dialog).toHaveTextContent("30 days");
     expect(dialog).toHaveTextContent("Replace, Keep, or Merge");
     expect(dialog).toHaveTextContent("remote provider history is not deleted");
+  });
+
+  it("Erase names every deleted surface and says the file stays", () => {
+    render(<EraseBookDialog open title="Old Copy" onConfirm={() => {}} onCancel={() => {}} />);
+
+    const dialog = screen.getByTestId("erase-book-dialog");
+    expect(dialog).toHaveTextContent("Old Copy");
+    expect(dialog).toHaveTextContent("reading progress");
+    expect(dialog).toHaveTextContent("annotations");
+    expect(dialog).toHaveTextContent("collection membership");
+    expect(dialog).toHaveTextContent("metadata overrides");
+    expect(dialog).toHaveTextContent("provider links");
+    expect(dialog).toHaveTextContent("files on disk are not touched");
+    expect(dialog).toHaveTextContent("cannot be undone");
   });
 
   it("bulk Forget names the count and keeps files on disk", () => {
@@ -228,26 +243,42 @@ describe("History Forget and restore", () => {
     expect(screen.queryByTestId("restore-book-dialog")).not.toBeInTheDocument();
   });
 
-  it("restores without a file straight from the quiet button", async () => {
+  it("erases a forgotten row only after the confirm dialog", async () => {
     mockInvoke({
-      ...baseResponses([], [makeBookTrashEntry({ id: 7, replacementBookId: null })]),
-      restore_book: {
-        status: "restored",
-        bookId: 41,
-        bookUid: "abcdefabcdefabcdefabcdefabcdefab",
-        conflict: null,
-      },
+      ...baseResponses(
+        [],
+        [makeBookTrashEntry({ id: 7, title: "Old Copy", replacementBookId: null })],
+      ),
+      erase_book_trash: true,
     });
     renderHistory();
 
     await openForgottenTab(7);
-    await userEvent.click(screen.getByTestId("book-trash-restore-without-file-7"));
+    await userEvent.click(screen.getByTestId("book-trash-erase-7"));
+
+    const dialog = screen.getByTestId("erase-book-dialog");
+    expect(dialog).toHaveTextContent("Old Copy");
+    expect(invokeMock).not.toHaveBeenCalledWith("erase_book_trash", { trashId: 7 });
+
+    await userEvent.click(screen.getByTestId("erase-book-confirm"));
 
     await waitFor(() => {
-      expect(invokeMock).toHaveBeenCalledWith("restore_book", { trashId: 7 });
+      expect(invokeMock).toHaveBeenCalledWith("erase_book_trash", { trashId: 7 });
     });
-    expect(pickBookFileMock).not.toHaveBeenCalled();
-    expect(screen.queryByTestId("restore-book-dialog")).not.toBeInTheDocument();
+  });
+
+  it("keeps the entry when Erase is cancelled", async () => {
+    mockInvoke({
+      ...baseResponses([], [makeBookTrashEntry({ id: 7, replacementBookId: null })]),
+      erase_book_trash: true,
+    });
+    renderHistory();
+
+    await openForgottenTab(7);
+    await userEvent.click(screen.getByTestId("book-trash-erase-7"));
+    await userEvent.click(screen.getByTestId("erase-book-cancel"));
+
+    expect(invokeMock).not.toHaveBeenCalledWith("erase_book_trash", { trashId: 7 });
   });
 
   it("asks for the file and restores the picked path in one step", async () => {
