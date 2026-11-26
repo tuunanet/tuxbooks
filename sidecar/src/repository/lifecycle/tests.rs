@@ -297,7 +297,6 @@ async fn list_trash_reports_whether_the_replacement_still_has_a_file() {
 }
 
 /// A trash row snapshotted before the Last known path existed stays
-
 /// readable and simply has no path (tuxbooks-t9p.1). One bad row must not
 /// fail the whole listing.
 #[tokio::test(flavor = "multi_thread")]

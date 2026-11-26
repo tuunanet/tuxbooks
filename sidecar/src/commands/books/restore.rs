@@ -73,14 +73,15 @@ pub async fn restore_book(
             &LibraryChange::Removed { book_id: *book_id },
         );
     }
-    // A pick no library book owned attaches to the restored record, which
-    // comes back detached; the card below must carry the new file.
+    // An owned pick re-binds existing file rows: no new hash binds, so no
+    // identity resolution happens and no tombstone publish is needed. An
+    // un-owned pick attaches to the restored record, which comes back
+    // detached; the card below must carry the new file.
     if outcome.status == RestoreStatus::Restored {
         if let (Some(pick), Some(book_uid)) = (picked.as_ref(), outcome.book_uid.clone()) {
             if pick.replacement.is_none() {
                 publish_restore(state).await?;
-                // The publish pass projects the restore back from the mirror,
-                // and the projection can move the durable id; the uid is the
+                // The publish pass can move the durable id; the uid is the
                 // stable key, so attach through the id the record holds now.
                 if let Some(current) = books::durable_id_for_uid(&state.db, &book_uid).await? {
                     outcome.book_id = Some(current);
@@ -175,7 +176,8 @@ async fn validate_pick(
 /// fabricated, and it publishes a restore, never a shared delete. If the
 /// pass fails, attaching would fork the identity, so the pick is refused;
 /// the restore stays committed and the file can be attached after sync
-/// recovers.
+/// recovers. The pass's error propagates unchanged: an internal sync
+/// failure is not invalid user input, and the sync layer records it.
 async fn publish_restore(state: &AppState) -> Result<(), AppError> {
     let Some(service) = state.sync.as_deref() else {
         return Ok(());
@@ -183,11 +185,7 @@ async fn publish_restore(state: &AppState) -> Result<(), AppError> {
     if !service.status().await?.enabled {
         return Ok(());
     }
-    service.run_pass().await.map_err(|err| {
-        AppError::InvalidInput(format!(
-            "could not publish the restore before attaching the file: {err}"
-        ))
-    })
+    service.run_pass().await
 }
 
 /// Run the different-bytes flow (tuxbooks-t9p.3). With no mode, report the
