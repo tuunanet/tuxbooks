@@ -11,6 +11,14 @@ import { ensureLibrary, openBookDetail, textOf, waitForLibraryView } from "./hel
 const seededEpub = path.join(libraryDir, "minimal.epub");
 /** The one-time backup Save keeps next to the rewritten file. */
 const seededEpubBackup = path.join(libraryDir, "minimal.epub.bak");
+/** Wider than the metadata card at any window width, ending in one unbroken run. */
+const oversizedSubject = [
+  "artificial intelligence; artificial intelligence books; LLMs; ai automation; multi agent system; Python; LangChain; LlamaIndex; Autogen",
+  "computer science; software engineering; natural language processing; machine learning; deep learning; neural networks; reinforcement learning; transformers; generative AI; agents",
+  "x".repeat(200),
+].join(" ");
+/** Long, but wrappable: the detail header prints the author as plain text. */
+const longAuthor = Array.from({ length: 12 }, () => "Ada Lovelace").join(" ");
 
 function sourceSnapshot(): { size: number; mtimeMs: number } {
   const stats = statSync(seededEpub);
@@ -24,6 +32,29 @@ async function cardTexts(page: Page): Promise<string> {
       .map((card) => card.textContent ?? "")
       .join("\n"),
   );
+}
+
+/** Form controls that reach past the metadata card's right padding edge. */
+async function controlsOutsideCard(page: Page): Promise<string[]> {
+  // Text metrics set intrinsic widths; the fallback font would measure differently.
+  await page.evaluate(() => document.fonts.ready);
+  return page.evaluate(() => {
+    const card = document.querySelector<HTMLElement>('[data-testid="metadata-card"]');
+    if (!card) throw new Error("metadata card is not rendered");
+    const style = getComputedStyle(card);
+    const edge =
+      card.getBoundingClientRect().right -
+      parseFloat(style.paddingRight) -
+      parseFloat(style.borderRightWidth);
+    return Array.from(card.querySelectorAll<HTMLElement>("input, textarea, button, span"))
+      .filter((control) => {
+        const box = control.getBoundingClientRect();
+        return box.width > 0 && box.right > edge + 0.5;
+      })
+      .map(
+        (control) => control.getAttribute("data-testid") ?? control.textContent ?? control.tagName,
+      );
+  });
 }
 
 /** Open the detail view's Metadata panel (issue #58: inline editing). */
@@ -117,5 +148,23 @@ test.describe("metadata curation (milestone 7)", () => {
 
     await expect(page.getByTestId("metadata-panel")).toBeVisible({ timeout: 30000 });
     await expect(page.getByTestId("metadata-title")).not.toHaveValue("", { timeout: 30000 });
+  });
+
+  /**
+   * A subject or author has no upper bound on its width. In the form a chip
+   * must not decide the width of the other fields.
+   */
+  test("keeps every field inside the card when a subject or author is wider than the card", async ({
+    page,
+  }) => {
+    await openMetadataPanel(page, `${seededBookTitles.epub} (EPUB)`);
+
+    await page.getByTestId("metadata-authors").fill(longAuthor);
+    await page.getByTestId("metadata-authors-add").click();
+    await page.getByTestId("metadata-subjects").fill(oversizedSubject);
+    await page.getByTestId("metadata-subjects-add").click();
+    await expect(page.getByTestId("metadata-subjects-list")).toBeVisible();
+
+    expect(await controlsOutsideCard(page)).toEqual([]);
   });
 });
