@@ -22,7 +22,7 @@
   "devDependencies": {
     "@nanonets/graft": "0.24.1",
     "@types/node": "^24.19.2",
-    "electron": "^44.9.1",
+    "electron": "^45.1.0",
     "electron-builder": "26.18.0",
     "esbuild": "^0.28.2",
     "lint-staged": "^17.6.0",
