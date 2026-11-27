@@ -57,6 +57,25 @@ async function controlsOutsideCard(page: Page): Promise<string[]> {
   });
 }
 
+/**
+ * How many of the Overview's subject chips reach past the detail column, and
+ * how many have their text cut off.
+ */
+async function overviewOverflow(page: Page): Promise<{ outside: number; clipped: number }> {
+  return page.evaluate(() => {
+    const section = document.querySelector<HTMLElement>('[data-testid="book-detail"]');
+    if (!section) throw new Error("book detail is not rendered");
+    const edge = section.getBoundingClientRect().right;
+    const chips = Array.from(
+      section.querySelectorAll<HTMLElement>('[data-testid="detail-subjects"] > span'),
+    );
+    return {
+      outside: chips.filter((chip) => chip.getBoundingClientRect().right > edge + 0.5).length,
+      clipped: chips.filter((chip) => chip.scrollWidth > chip.clientWidth + 1).length,
+    };
+  });
+}
+
 /** Open the detail view's Metadata panel (issue #58: inline editing). */
 async function openMetadataPanel(page: Page, ariaLabel: string): Promise<void> {
   await openBookDetail(page, ariaLabel);
@@ -152,11 +171,10 @@ test.describe("metadata curation (milestone 7)", () => {
 
   /**
    * A subject or author has no upper bound on its width. In the form a chip
-   * must not decide the width of the other fields.
+   * must not decide the width of the other fields. Saved, a subject shows on
+   * the Overview without a card around it and must stay inside the column.
    */
-  test("keeps every field inside the card when a subject or author is wider than the card", async ({
-    page,
-  }) => {
+  test("keeps a wide subject or author from widening the detail view", async ({ page }) => {
     await openMetadataPanel(page, `${seededBookTitles.epub} (EPUB)`);
 
     await page.getByTestId("metadata-authors").fill(longAuthor);
@@ -166,5 +184,12 @@ test.describe("metadata curation (milestone 7)", () => {
     await expect(page.getByTestId("metadata-subjects-list")).toBeVisible();
 
     expect(await controlsOutsideCard(page)).toEqual([]);
+
+    await page.getByTestId("metadata-panel-save").click();
+    await expect(page.getByTestId("metadata-panel-saved")).toBeVisible({ timeout: 30000 });
+    await page.getByTestId("detail-tab-overview").click();
+    const chip = page.locator('[data-testid="detail-subjects"] > span');
+    await expect(chip).toHaveText(oversizedSubject);
+    expect(await overviewOverflow(page)).toEqual({ outside: 0, clipped: 0 });
   });
 });

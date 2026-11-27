@@ -174,7 +174,7 @@ Seeded specs and what they pin:
 - `progress-migration.e2e.ts` — seeds the scratch database with reading-progress rows in the previous app's format (foliate CFI + chapter href + percent, PDF page rows) and asserts the same LOGICAL location restores: beginning, chapter boundary, late book, a stale row degrading to a defined state, the PDF page. Mid-chapter offsets and multi-structure corpora stay in the Rust tier.
 - `reader-lifecycle.e2e.ts` — document-type switching, rapid repeated open/close, close-while-rendering recovery, rapid navigation convergence, window-resize re-anchoring, memory-bound assertions.
 - `annotations.e2e.ts` — a PDF highlight from a real text-layer selection, its attached note, and a bookmark on both formats, each revisited after close/reopen; an EPUB highlight that must paint again after reopen and after a drawer jump.
-- `metadata.e2e.ts` — edit → save writes the storeable fields into the file behind a one-time `.bak`; grid/detail/search update; reset disables itself once nothing is overridden; author and subject chips wider than the column, unbroken runs included, stay inside it.
+- `metadata.e2e.ts` — edit → save writes the storeable fields into the file behind a one-time `.bak`; grid/detail/search update; reset disables itself once nothing is overridden; author and subject chips wider than the column, unbroken runs included, stay inside the Metadata card and the Overview column.
 - `collections.e2e.ts` — create from the sidebar, add and remove through the card context menu, mark finished, delete the collection.
 
 Additional invocations exist beyond the default set:
