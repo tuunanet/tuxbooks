@@ -68,7 +68,10 @@ export function MetadataPanel({ book, curation }: MetadataPanelProps) {
 
   return (
     <div data-testid="metadata-panel" className="mt-6">
-      <div className="rounded-lg border bg-card p-5 text-card-foreground">
+      <div
+        data-testid="metadata-card"
+        className="rounded-lg border bg-card p-5 text-card-foreground"
+      >
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <h2 className="text-lg font-semibold">Edit Metadata</h2>
@@ -124,7 +127,9 @@ export function MetadataPanel({ book, curation }: MetadataPanelProps) {
               </div>
             </div>
 
-            <div className="mt-4 grid gap-4">
+            {/* An implicit auto column grows to its widest item, and one long chip dragged
+                every field past the card. grid-cols-1 keeps the column at the card's width. */}
+            <div className="mt-4 grid grid-cols-1 gap-4">
               <MetadataFieldGrid form={form} metadata={metadata} onChange={set} />
             </div>
 

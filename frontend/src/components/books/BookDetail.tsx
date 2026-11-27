@@ -12,6 +12,7 @@ import { ForgetBookDialog } from "./ForgetBookDialog";
 import { BookHighlightsPanel } from "./BookHighlightsPanel";
 import { MetadataPanel } from "./MetadataPanel";
 import { ResetBookDialog } from "./ResetBookDialog";
+import { ValueChip } from "./metadata/ValueChip";
 import { useBookActions, userFacing } from "@/hooks/useBookActions";
 import { useBookFiles } from "@/hooks/useBookFiles";
 import { useBookMetadata } from "@/hooks/useBookMetadata";
@@ -349,11 +350,7 @@ function BookOverviewTab({
           {subjects.length === 0 ? (
             <p className="text-sm text-muted-foreground">—</p>
           ) : (
-            subjects.map((subject) => (
-              <Badge key={subject} variant="secondary">
-                {subject}
-              </Badge>
-            ))
+            subjects.map((subject) => <ValueChip key={subject}>{subject}</ValueChip>)
           )}
         </div>
       </div>

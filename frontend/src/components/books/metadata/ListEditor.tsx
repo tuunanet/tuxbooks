@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { Plus, X } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { ValueChip } from "./ValueChip";
 
 export interface ListEditorProps {
   id: string;
@@ -38,7 +38,7 @@ export function ListEditor({
       {values.length > 0 && (
         <div className="flex flex-wrap gap-1.5" data-testid={`${testId}-list`}>
           {values.map((value) => (
-            <Badge key={value} variant="secondary" className="gap-1 pr-1">
+            <ValueChip key={value} className="gap-1 pr-1">
               {value}
               {!disabled && (
                 <button
@@ -51,7 +51,7 @@ export function ListEditor({
                   <X className="size-3" />
                 </button>
               )}
-            </Badge>
+            </ValueChip>
           ))}
         </div>
       )}

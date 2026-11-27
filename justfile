@@ -38,6 +38,28 @@ setup-hooks:
     echo "  also runs beads' post-checkout, post-merge, and prepare-commit-msg hooks"
     echo "disable with: git config --local --unset core.hooksPath"
 
+# Give Electron's SUID sandbox helper the root-owned setuid mode Chromium
+# requires, so `just dev` can launch in this checkout (Linux). `vp install`
+# unpacks the helper with mode 755, and hosts that restrict unprivileged
+# user namespaces leave `just dev` no other sandbox to fall back to.
+# chown clears the setuid bit, so chmod must come last. Needs sudo.
+setup-sandbox:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd "{{root}}"
+    p="$(node -p 'path.dirname(require("electron")) + "/chrome-sandbox"')"
+    if [ ! -f "$p" ]; then
+        echo >&2 "setup-sandbox: $p is missing; run vp install first"
+        exit 1
+    fi
+    if [ "$(stat -c '%u:%a' "$p")" = "0:4755" ]; then
+        echo "setup-sandbox: $p is already root-owned 4755"
+        exit 0
+    fi
+    sudo chown root:root "$p"
+    sudo chmod 4755 "$p"
+    echo "setup-sandbox: set $p to root-owned 4755"
+
 # Regenerate the committed EPUB fixture corpus (tests/fixtures/epub/):
 # deterministic source trees + artifacts + manifest. Byte-identical per run.
 make-epub-fixtures:
