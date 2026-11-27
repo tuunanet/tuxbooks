@@ -18,7 +18,12 @@ any frontend precondition.
   settings, and caches. A stale dev server still holding port 1420 is
   reclaimed when the holder is this project's Vite; anything else on the
   port is reported and left running. `fetch-pdfium` runs first, so PDF
-  covers work on a fresh checkout instead of failing the probe.
+  covers work on a fresh checkout instead of failing the probe. On hosts
+  that restrict unprivileged user namespaces, run `just setup-sandbox`
+  first (see "Electron runtime binary" below).
+- `just setup-sandbox` — give Electron's SUID sandbox helper the
+  root-owned setuid mode `just dev` needs on those hosts, once per
+  checkout. Needs sudo; idempotent.
 - `just build` — renderer bundle, Electron main/preload bundles, release
   sidecar binary built against the pinned glibc floor
   (`just sidecar-release`; needs docker or podman; see "Release sidecar
@@ -61,6 +66,21 @@ version) and is what fresh clones, CI checkouts, and `just dev`/`just
 test-e2e` rely on. If pnpm ever reports a missing
 `node_modules/electron/dist`, run the hook manually:
 `pnpm exec install-electron`.
+
+That unpacked `dist/` also ships Chromium's SUID sandbox helper, which
+`vp install` leaves at mode 755. On hosts that restrict unprivileged user
+namespaces (Ubuntu 23.10+ sets
+`kernel.apparmor_restrict_unprivileged_userns = 1`), Electron has no other
+sandbox to fall back to, and `just dev` aborts with "The SUID sandbox
+helper binary was found, but is not configured correctly". Fix it once per
+checkout with `just setup-sandbox`, which runs:
+
+    sudo chown root:root "$(node -p 'path.dirname(require("electron")) + "/chrome-sandbox"')"
+    sudo chmod 4755 "$(node -p 'path.dirname(require("electron")) + "/chrome-sandbox"')"
+
+`chown` clears the setuid bit, so `chmod` must come last. The E2E
+fixtures pass `--no-sandbox`, so `just test-e2e` does not need this; only
+`just dev` and manual `pnpm exec electron .` runs do.
 
 ## Electron bundles
 
