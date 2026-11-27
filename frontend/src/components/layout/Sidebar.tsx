@@ -53,7 +53,7 @@ export function Sidebar({
     <aside
       data-testid="sidebar"
       aria-label="Library sidebar"
-      className="flex w-56 shrink-0 flex-col border-r bg-muted/40 p-4"
+      className="flex w-72 min-w-72 shrink-0 flex-col border-r bg-muted/40 p-4"
     >
       <div className="mb-5 px-3">
         <h1 className="text-lg font-semibold">TuxBooks</h1>

@@ -9,7 +9,8 @@ import {
 import { appEntryPoint } from "../setup/fixtures.js";
 
 /**
- * Desktop-shell regression suite: branding, deterministic startup geometry,
+ * Desktop-shell regression suite: branding, sidebar minimum width and search
+ * placeholder fit, deterministic startup geometry,
  * min-size clamping, Settings-window scaling and visibility,
  * resize-after-maximize/restore, icon resolution, and the repeated-launch
  * policy — the window-lifecycle behaviors that must never regress.
@@ -120,6 +121,32 @@ test.describe("TuxBooks desktop shell", () => {
     // The document title overrides the BrowserWindow title once the page loads; the two must agree.
     expect(await page.title()).toBe("TuxBooks");
     await expect(page.locator('[data-testid="sidebar"] h1')).toHaveText("TuxBooks");
+  });
+
+  test("gives the sidebar a minimum width wide enough for the search placeholder", async ({
+    page,
+  }) => {
+    await expect(page.getByTestId("app-shell")).toBeVisible({ timeout: 30000 });
+    const fit = await page.evaluate(() => {
+      const input = document.querySelector<HTMLInputElement>(
+        'input[placeholder="Search library or collections"]',
+      );
+      const sidebar = document.querySelector<HTMLElement>('[data-testid="sidebar"]');
+      if (!input || !sidebar) return null;
+      const style = getComputedStyle(input);
+      const ctx = document.createElement("canvas").getContext("2d");
+      if (!ctx) return null;
+      ctx.font = `${style.fontStyle} ${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+      return {
+        placeholderWidth: ctx.measureText(input.placeholder).width,
+        contentWidth:
+          input.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight),
+        sidebarMinWidth: getComputedStyle(sidebar).minWidth,
+      };
+    });
+    if (!fit) throw new Error("search input or sidebar not found in the shell");
+    expect(fit.sidebarMinWidth).toBe("288px");
+    expect(fit.placeholderWidth).toBeLessThanOrEqual(fit.contentWidth);
   });
 
   test("launches centered, unmaximized, at the default size", async ({ electronApp }) => {
